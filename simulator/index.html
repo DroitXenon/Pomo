@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pomo · Prototype studio</title>
+  <link rel="stylesheet" href="style.css"><script src="app.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="./">pomo<span>●</span></a><span class="tag">PROTOTYPE STUDIO / 01</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">YOUR LITTLE STUDY COMPANION</p><h1>A little presence.<br>A little more focus.</h1><p>Meet Pomo in its first workspace. Explore its expressions<br class="desktop"> and connect the pieces, one small step at a time.</p></section>
+    <div class="workspace">
+      <section class="robot-panel" aria-label="Simulated robot">
+        <div class="panel-heading"><span>THE ROBOT</span><span class="tag">SIMULATOR</span></div>
+        <div class="robot"><div class="antenna"></div><div class="screen" id="screen" data-display="ready"><div class="eyes"><i></i><i></i></div><div class="mouth"></div><span class="cheek left"></span><span class="cheek right"></span></div><div class="robot-name">pomo</div></div>
+        <div class="robot-copy" aria-live="polite"><h2 id="state-title">Waiting for connection</h2><p id="state-copy">Your companion will be here in a moment.</p></div>
+        <button id="monitor" class="primary" disabled>Enable monitoring</button>
+        <p id="monitor-status" class="small">Monitoring status unknown</p>
+        <div class="notice">Phase 1 preview · Camera detection is not implemented.<br>Monitoring controls only change the backend state.</div>
+      </section>
+      <aside class="dev-panel">
+        <div class="panel-heading"><span>DEVELOPER PANEL</span><span class="dot-label" id="connection" role="status">Connecting</span></div>
+        <h2>Make the connection.</h2><p class="muted">Manual controls for checking the display and communication. These are not camera observations.</p>
+        <div class="detail-row"><span>Camera</span><strong>Not implemented</strong></div><div class="detail-row"><span>State revision</span><strong id="revision">—</strong></div>
+        <h3>Preview an expression</h3><div class="previews"><button data-preview="ready" disabled>⌣ &nbsp; Ready</button><button data-preview="possible_absence" disabled>⌢ &nbsp; Possible absence</button><button data-preview="reminding" disabled>! &nbsp; Reminder</button><button data-preview="unavailable" disabled>− &nbsp; Unavailable</button></div>
+        <p id="feedback" role="status" class="small">Waiting for the backend snapshot.</p>
+        <div class="log-heading"><h3>Connection journal</h3><button id="clear" class="text-button">Clear</button></div><ol id="journal" aria-label="Recent connection events"></ol>
+      </aside>
+    </div>
+    <footer><span>LOCAL FIRST. SMALL STEPS.</span><span>Phase 01 — Environment & connection</span></footer>
+  </main>
+</body></html>

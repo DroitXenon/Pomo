@@ -1,10 +1,10 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const descriptions = {
-  ready: ["Hello, study buddy.", "I'm ready when you are."],
-  possible_absence: ["Where did you go?", "A preview of Pomo's possible-absence expression."],
-  reminding: ["A gentle little nudge.", "A preview only — no reminder was triggered."],
-  unavailable: ["Taking a little pause.", "A preview of the detection-unavailable display."]
+const displayLabels = {
+  ready: "Ready",
+  possible_absence: "Possible absence",
+  reminding: "Reminder",
+  unavailable: "Unavailable"
 };
 let socket, retryTimer, connectTimer, attempts = 0, stopped = false, state = null;
 function log(text) {
@@ -22,12 +22,13 @@ function controls(connected) {
 function render(next) {
   state = next;
   $("screen").dataset.display = state.display;
-  [$("state-title").textContent, $("state-copy").textContent] = descriptions[state.display];
+  $("state-title").textContent = displayLabels[state.display];
   $("monitor").textContent = state.monitoring_enabled ? "Pause monitoring" : "Enable monitoring";
+  $("monitor").setAttribute("aria-pressed", String(state.monitoring_enabled));
   $("monitor-status").textContent = state.monitoring_enabled ? "Monitoring enabled · simulation only" : "Monitoring paused";
   $("revision").textContent = state.revision;
   document.querySelectorAll("[data-preview]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.preview === state.display)));
-  $("feedback").textContent = state.dev_controls ? "Manual display previews are available." : "Developer controls are disabled by the backend.";
+  $("feedback").textContent = state.dev_controls ? "" : "Expression controls disabled.";
   controls(true);
 }
 function connect() {
@@ -42,7 +43,7 @@ function connect() {
   socket.onmessage = ({data}) => {
     try {
       const message = JSON.parse(data);
-      if (message.type === "state" && descriptions[message.display]) {
+      if (message.type === "state" && displayLabels[message.display]) {
         clearTimeout(connectTimer);
         attempts = 0;
         $("connection").textContent = "Connected";

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pomo · Simulator</title>
+  <link rel="stylesheet" href="style.css?v=3"><script src="app.js?v=2" defer></script>
+</head>
+<body>
+  <header>
+    <div class="app-heading"><a class="brand" href="./">pomo<span aria-hidden="true">●</span></a><h1>Simulator</h1></div>
+    <span class="dot-label" id="connection" role="status">Connecting</span>
+  </header>
+  <main>
+    <div class="workspace">
+      <section class="robot-panel" aria-label="Simulated robot">
+        <div class="robot" aria-hidden="true"><div class="antenna"></div><div class="screen" id="screen" data-display="ready"><div class="eyes"><i></i><i></i></div><div class="mouth"></div><span class="cheek left"></span><span class="cheek right"></span></div><div class="robot-name">pomo</div></div>
+        <h2 id="state-title" aria-live="polite">Connecting…</h2>
+        <button id="monitor" class="primary" disabled>Enable monitoring</button>
+        <p id="monitor-status" class="small">Monitoring status unknown</p>
+      </section>
+      <aside class="controls-panel" aria-label="Simulator controls">
+        <h2>Expression</h2>
+        <div class="previews"><button data-preview="ready" disabled>Ready</button><button data-preview="possible_absence" disabled>Possible absence</button><button data-preview="reminding" disabled>Reminder</button><button data-preview="unavailable" disabled>Unavailable</button></div>
+        <p class="small simulation-note">Manual simulation · No camera input</p>
+        <p id="feedback" role="status" class="small"></p>
+        <details class="diagnostics">
+          <summary>Connection details</summary>
+          <div class="detail-row"><span>State revision</span><strong id="revision">—</strong></div>
+          <div class="log-heading"><h3>Connection journal</h3><button id="clear" class="text-button">Clear</button></div>
+          <ol id="journal" aria-label="Recent connection events"></ol>
+        </details>
+      </aside>
+    </div>
+  </main>
+</body></html>

@@ -1,6 +1,8 @@
 # Stack choices
 
-Exact resolved versions, including transitive and test dependencies, are pinned in requirements.txt.
+`environment.yml` defines the `pomo` Conda environment with Python 3.13 and pip.
+The existing application, transitive and test package versions are preserved in
+its `pip` section. Conda resolves the Python 3.13 patch version and pip version.
 
 | Selected | Reason | Alternative considered |
 | --- | --- | --- |
@@ -11,6 +13,8 @@ Exact resolved versions, including transitive and test dependencies, are pinned 
 | pytest + HTTPX | Tests actual HTTP and WebSocket routes | State-only tests miss protocol errors |
 
 Official reference: https://fastapi.tiangolo.com/advanced/websockets/
+
+Conda environment format: https://docs.conda.io/projects/conda/en/stable/user-guide/tasks/manage-environments.html#creating-an-environment-file-manually
 
 No Node runtime, database, external fonts or camera libraries are required.
 Camera packages will be selected and installed in Phase 2. UI choices do not commit

@@ -14,17 +14,31 @@ No camera is captured or stored. Enabling monitoring only changes a simulation f
 
 ## Setup and run
 
-Use Python 3.11–3.13 (verified on 3.13). From the repository root:
+Install Conda (Miniconda or Miniforge). The project environment uses Python 3.13.
+From the repository root:
 
 ```sh
-PYTHON=python3.13 sh scripts/setup.sh
+sh scripts/setup.sh
 cp .env.example .env
 sh scripts/dev.sh
 ```
 
-Open http://127.0.0.1:8000/ and stop the server with Ctrl+C. Setup installs into
-this project's isolated `.venv` and can be rerun. If python3 is a suitable version,
-omit the PYTHON override. Copy `.env` only on first setup; preserve existing values.
+Open http://127.0.0.1:8000/ and stop the server with Ctrl+C. Setup creates or updates
+the `pomo` Conda environment from `environment.yml` and can be rerun. Conda supplies
+Python and pip; the file's `pip` section preserves the existing pinned Python
+packages. The startup script selects `pomo` automatically, so activation is not
+required. Copy `.env` only on first setup; preserve existing values.
+
+To use Conda directly, including on Windows:
+
+```sh
+conda env create --file environment.yml
+conda activate pomo
+python -m backend
+```
+
+For an existing environment, use `conda env update --name pomo --file environment.yml --prune`
+instead of `conda env create`.
 
 ## Configuration
 
@@ -41,7 +55,7 @@ use workspace access controls. All tabs control the same robot state.
 
 ## Cloud workspace
 
-1. Install dependencies with the setup command above in a Python 3.11–3.13 workspace.
+1. Use a workspace with Conda installed and run the setup command above.
 2. Run `POMO_HOST=0.0.0.0 sh scripts/dev.sh`.
 3. Forward port 8000 privately and open its preview URL at the root path.
 4. Complete any workspace authentication; the proxy must support WebSocket upgrades.
@@ -59,7 +73,7 @@ Neither is implemented now.
 ## Verify
 
 ```sh
-.venv/bin/python -m pytest -q
+conda run --name pomo python -m pytest -q
 ```
 
 Manual demo:
@@ -81,13 +95,13 @@ help diagnose command flow. See [verification](docs/verification.md).
 - docs/: [stack decision](docs/stack.md) and [message protocol](docs/protocol.md).
 - scripts/: repeatable setup and startup.
 - tests/: HTTP/WebSocket integration checks.
-- requirements.txt: pinned application and test dependencies.
+- environment.yml: Conda environment and pinned application/test dependencies.
 - .env.example: configurable defaults.
 
 ## Troubleshooting
 
 - Port in use: change POMO_PORT and open/forward that port.
 - Disconnected: check the server, /health, proxy WebSocket support and preview authentication.
-- Missing packages: rerun setup and use scripts/dev.sh to select the project virtual environment.
+- Missing environment or packages: rerun `sh scripts/setup.sh`; `scripts/dev.sh` selects the `pomo` Conda environment.
 - State resets: expected after backend restart; persistence is out of scope. Use one worker.
 - No camera permission prompt: expected; camera detection is Phase 2.

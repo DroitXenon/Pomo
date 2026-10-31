@@ -1,5 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 cd "$(dirname "$0")/.."
-"${PYTHON:-python3}" -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+if ! command -v conda >/dev/null 2>&1; then
+  printf '%s\n' 'Conda is required. Install Miniconda or Miniforge and make conda available in this terminal.' >&2
+  exit 1
+fi
+conda env update --name pomo --file environment.yml --prune

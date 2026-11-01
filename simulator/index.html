@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pomo · Simulator</title>
-  <link rel="stylesheet" href="style.css?v=3"><script src="app.js?v=2" defer></script>
+  <link rel="stylesheet" href="style.css?v=4"><script src="camera.js?v=1" defer></script><script src="app.js?v=3" defer></script>
 </head>
 <body>
   <header>
@@ -19,9 +19,15 @@
         <p id="monitor-status" class="small">Monitoring status unknown</p>
       </section>
       <aside class="controls-panel" aria-label="Simulator controls">
+        <section class="camera-panel" aria-label="Camera preview">
+          <h2>Camera</h2>
+          <video id="camera-preview" autoplay muted playsinline aria-label="Live camera preview"></video>
+          <p id="camera-status" class="small" role="status">Camera paused</p>
+          <p class="small">Local preview · Face detection and reminders are not enabled yet.</p>
+        </section>
         <h2>Expression</h2>
         <div class="previews"><button data-preview="ready" disabled>Ready</button><button data-preview="possible_absence" disabled>Possible absence</button><button data-preview="reminding" disabled>Reminder</button><button data-preview="unavailable" disabled>Unavailable</button></div>
-        <p class="small simulation-note">Manual simulation · No camera input</p>
+        <p class="small simulation-note">Manual expression previews</p>
         <p id="feedback" role="status" class="small"></p>
         <details class="diagnostics">
           <summary>Connection details</summary>

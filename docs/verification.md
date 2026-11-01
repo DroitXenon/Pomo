@@ -38,3 +38,34 @@ Verified on macOS ARM64 with Conda 25.1.1 and Python 3.13.18:
   acknowledged, and Ctrl+C shut down the backend.
 
 Conda setup on Windows and Linux has not been verified.
+
+## 2026-10-31 — WSL browser-camera foundation (steps 1–4)
+
+- Worked in `/home/vivian/pomo` on the existing `feature/camera` branch, using
+  the activated `pomo` environment (Python 3.13.18).
+- Installed OpenCV contrib 5.0.0.93 and MediaPipe 1.2.0. Resolved MediaPipe's
+  missing `libGLESv2.so.2` with Linux-only EGL/GLES Conda dependencies declared
+  in `environment.yml`; setup uses CEP-24 selectors (Conda 26.9.4).
+- Environment update via `sh scripts/setup.sh` and checksum verification passed.
+  Model float16 revision 1 was downloaded from Google's official model bucket;
+  exact URL and SHA-256 are recorded in `models/README.md`.
+- Real-model app smoke check: startup readiness, HTTP JPEG ingestion, WebSocket
+  camera availability, pause and shutdown passed.
+- Real OpenCV import, synthetic JPEG decode/BGR-to-RGB conversion, model creation,
+  blank-image inference (zero faces) and model close passed on the dedicated
+  worker. Native MediaPipe informational/warning messages appeared.
+- Backend integration suite: **18 passed**, with the pre-existing
+  Starlette/HTTPX deprecation warning. Tests cover shared state, ownership, malformed/oversized
+  images, replayed sequences, owner disconnect, watchdog expiration, backpressure,
+  processing timeout, pause during processing and initialization/processing errors.
+- `python -m pip check`: no broken requirements. JavaScript syntax checks and
+  `node --test tests/test_camera_client.cjs` passed using a locally downloaded,
+  ignored Node 22.14.0 executable. Three client tests passed; they exercise late permission grants,
+  sequential uploads, abort/track cleanup and permission-denial messaging with mocks.
+- `sh -n scripts/setup.sh scripts/dev.sh` and `git diff --check` passed.
+- HTTP/WebSocket tests require execution outside this tool sandbox: sandboxed
+  Starlette TestClient stalled creating its event-loop portal before app startup.
+  No application workaround was added for that tooling restriction.
+- Physical Windows webcam access, browser layout/accessibility, real browser
+  permissions, tab lifecycle, Windows/macOS installation and HTTPS forwarding have
+  **not** been validated. No face observations or automatic reminders are enabled.

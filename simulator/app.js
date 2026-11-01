@@ -7,6 +7,10 @@ const displayLabels = {
   unavailable: "Unavailable"
 };
 let socket, retryTimer, connectTimer, attempts = 0, stopped = false, state = null;
+const camera = new CameraController($("camera-preview"), $("camera-status"), (message) => {
+  $("feedback").textContent = message;
+  send({type: "camera_failed"});
+});
 function log(text) {
   const item = document.createElement("li");
   item.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
@@ -25,11 +29,12 @@ function render(next) {
   $("state-title").textContent = displayLabels[state.display];
   $("monitor").textContent = state.monitoring_enabled ? "Pause monitoring" : "Enable monitoring";
   $("monitor").setAttribute("aria-pressed", String(state.monitoring_enabled));
-  $("monitor-status").textContent = state.monitoring_enabled ? "Monitoring enabled · simulation only" : "Monitoring paused";
+  $("monitor-status").textContent = state.monitoring_enabled ? "Camera monitoring enabled · detection pending" : "Monitoring paused";
   $("revision").textContent = state.revision;
   document.querySelectorAll("[data-preview]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.preview === state.display)));
   $("feedback").textContent = state.dev_controls ? "" : "Expression controls disabled.";
   controls(true);
+  camera.update(state);
 }
 function connect() {
   if (stopped) return;
@@ -43,7 +48,7 @@ function connect() {
   socket.onmessage = ({data}) => {
     try {
       const message = JSON.parse(data);
-      if (message.type === "state" && displayLabels[message.display]) {
+      if (message.type === "state" && message.protocol_version === 2 && displayLabels[message.display]) {
         clearTimeout(connectTimer);
         attempts = 0;
         $("connection").textContent = "Connected";
@@ -60,6 +65,8 @@ function connect() {
   socket.onclose = () => {
     clearTimeout(connectTimer);
     controls(false);
+    camera.stop();
+    $("camera-status").textContent = "Camera stopped · backend disconnected";
     $("connection").textContent = "Disconnected";
     $("connection").dataset.connected = "false";
     $("monitor-status").textContent = "Disconnected · displayed state may be stale";
@@ -78,8 +85,15 @@ $("monitor").onclick = () => send({type: "set_monitoring", enabled: !state.monit
 document.querySelectorAll("[data-preview]").forEach((button) => {
   button.onclick = () => send({type: "preview_display", display: button.dataset.preview});
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && camera.session) {
+    camera.stop();
+    send({type: "set_monitoring", enabled: false});
+  }
+});
 $("clear").onclick = () => $("journal").replaceChildren();
 window.addEventListener("pagehide", () => {
+  camera.stop();
   stopped = true; clearTimeout(retryTimer); clearTimeout(connectTimer); socket?.close();
 });
 window.addEventListener("pageshow", (event) => { if (event.persisted) { stopped = false; connect(); } });

@@ -16,6 +16,19 @@ Official reference: https://fastapi.tiangolo.com/advanced/websockets/
 
 Conda environment format: https://docs.conda.io/projects/conda/en/stable/user-guide/tasks/manage-environments.html#creating-an-environment-file-manually
 
-No Node runtime, database, external fonts or camera libraries are required.
-Camera packages will be selected and installed in Phase 2. UI choices do not commit
-the firmware to a browser stack.
+No Node runtime, database or external fonts are required.
+
+Camera foundation uses `opencv-contrib-python==5.0.0.93` and `mediapipe==1.2.0`.
+Only one OpenCV distribution is installed; MediaPipe already depends on contrib.
+Pillow validates JPEG headers before OpenCV allocates the decoded image. NumPy,
+Pillow and all newly resolved Python dependencies are pinned in `environment.yml`.
+Linux EGL/GLES native libraries are declared using CEP-24 comment selectors;
+setup uses `--format cep-24` (verified with Conda 26.9.4).
+
+A Windows browser owns getUserMedia capture and the direct video preview. WSL
+receives sequential bounded JPEG HTTP uploads; it does not need camera passthrough.
+One dedicated worker initializes the model, decodes frames and closes the model.
+Face observations and reminder policy remain deferred. The model manifest is in
+`models/README.md`; setup verifies its fixed revision and checksum.
+
+UI choices do not commit the firmware to a browser stack.

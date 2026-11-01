@@ -8,13 +8,18 @@ Pomo is a small desktop robot designed to be a friendly study companion. It aims
 
 Establish the prototype scope, select and document libraries, organise the repository, configure ports and connect the simulator to the backend.
 
-The current foundation includes:
+The foundation includes:
 
 - A `pomo` Conda environment, repeatable setup and configurable startup.
 - FastAPI HTTP routes and a WebSocket transport with strict command validation.
 - A monochrome simulator with a placeholder robot face, monitoring control and four manual expression previews.
 - Shared state broadcasts, connection status, automatic reconnection and a bounded connection journal.
 - Integration tests covering routes, commands, broadcasts and state recovery.
+
+Camera foundation (steps 1–4) is implemented: browser capture/preview, bounded
+JPEG uploads, one-tab ownership and a long-lived Python processing worker. Face
+observations and automatic reminders remain planned. Real Windows webcam testing
+is still required.
 
 The prototype scope is camera detection, robot display and reminders. Pomodoro timing, session controls and voice recognition are deferred.
 
@@ -54,6 +59,30 @@ State changes and broadcasts are serialised with an `asyncio.Lock`. Each accepte
 
 All clients control the same robot state. State is process-local and resets on restart, so run a single backend worker. Persistence, separate user sessions and cross-process state synchronisation are not implemented.
 
+### Camera capture and frame ingestion
+
+The camera pipeline adds frame ingestion alongside the command and state flow above. Successful frame processing and camera lifecycle changes also increment the revision counter and broadcast complete snapshots.
+
+```text
+Windows browser: getUserMedia → video preview + sampled JPEG uploads
+  → POST /camera/frame → dedicated Python worker: OpenCV decode/BGR-to-RGB
+  → camera availability + frame metadata → /ws snapshots → simulator
+```
+
+Browser capture works around WSL's lack of direct Windows webcam access. Run the
+backend in WSL and open `http://localhost:8000` in a Windows browser. Camera access
+needs browser permission and localhost or HTTPS. The preview stays in the browser;
+uploaded frames stay in memory and are never recorded or logged.
+
+Only the tab enabling monitoring owns the camera session. Other tabs can view
+state or pause monitoring. Pause, tab hiding/closing, connection loss, failed
+uploads and server timeouts release/invalidate capture. Re-enable explicitly to
+resume. Permission requests completing after cancellation release their tracks.
+
+The processing worker loads Face Landmarker once at startup and closes it on
+shutdown. This milestone only decodes frames and reports transport availability;
+loading the model does not enable face observations or reminder decisions.
+
 ### Planned detection flow
 
 ```text
@@ -64,7 +93,7 @@ Configurable camera source or simulated observations
   → browser simulator / future physical robot adapter
 ```
 
-The observation pipeline and behaviour policy belong to Phase 2. The `firmware/` directory currently contains integration notes; it does not contain a working hardware adapter.
+The observation pipeline and behaviour policy are the next Phase 2 steps. The `firmware/` directory currently contains integration notes; it does not contain a working hardware adapter.
 
 ## Runtime and Dependencies
 
@@ -74,23 +103,25 @@ The observation pipeline and behaviour policy belong to Phase 2. The `firmware/`
 | HTTP and validation | FastAPI 0.162.0, Pydantic 2.14.1 | Routes, command schema and input validation |
 | Server and transport | Uvicorn 0.54.0, websockets 17.3 | ASGI serving and WebSocket connections |
 | Interface | Plain HTML, CSS and JavaScript | Robot rendering and development controls |
+| Camera processing | OpenCV contrib 5.0.0.93, MediaPipe 1.2.0 | JPEG decoding; loaded Face Landmarker for future perception |
 | Configuration | python-dotenv 1.2.4 | Local configuration with environment overrides |
 | Tests | pytest 9.1.1, HTTPX 0.28.1 | HTTP/WebSocket integration checks |
 
 [`environment.yml`](environment.yml) is the dependency definition. Conda resolves Python 3.13 and pip from `conda-forge`; its `pip` section pins the existing application, transitive and test packages. Python patch releases and pip are not locked to exact versions.
 
-No frontend build step or Node.js runtime is required. Camera-processing libraries have not been added. See [stack choices](docs/stack.md) for the implementation rationale.
+No frontend build step or Node.js runtime is required. Linux-only EGL/GLES dependencies are selected from the same environment file. See [stack choices](docs/stack.md) for the implementation rationale.
 
 ## Setup and Run
 
-Install Conda through Miniconda or Miniforge, then run from the repository root:
+Install a recent Conda with CEP-24 support (`--format cep-24`; verified with Conda 26.9.4), then run from the repository root:
 
 ```sh
 sh scripts/setup.sh
 sh scripts/dev.sh
 ```
 
-Setup creates or updates the named `pomo` environment. Startup uses `conda run` to select it automatically and streams server logs to the terminal.
+Setup creates or updates the named `pomo` environment and downloads/verifies the
+versioned Face Landmarker model (see [model manifest](models/README.md)). Startup uses `conda run` to select it automatically and streams server logs to the terminal.
 
 Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Stop the backend with Ctrl+C.
 
@@ -101,18 +132,22 @@ For local configuration, copy `.env.example` to `.env` once and edit the values.
 These commands also provide the setup path for Windows:
 
 ```sh
-conda env create --file environment.yml
+conda env create --file environment.yml --format cep-24
 conda activate pomo
+python scripts/setup_model.py
 python -m backend
 ```
 
 For an existing environment, update it instead of creating it again:
 
 ```sh
-conda env update --name pomo --file environment.yml --prune
+conda env update --name pomo --file environment.yml --format cep-24 --prune
 ```
 
-The Conda setup has been verified on macOS ARM64. Windows and Linux installations still require validation.
+The original setup was verified on macOS ARM64. The camera environment update and
+model initialization are verified on WSL2 Linux x86-64. The updated environment
+uses CEP-24 platform selectors for Linux EGL/GLES; Windows/macOS setup with the
+new camera dependencies still requires validation.
 
 ## Configuration
 
@@ -130,59 +165,50 @@ Example shell override:
 POMO_PORT=8001 POMO_DEV_CONTROLS=false sh scripts/dev.sh
 ```
 
-Disabling development controls rejects expression-preview commands. Monitoring remains a stored simulation flag; enabling it does not start a camera or trigger automatic reminders.
+Disabling development controls rejects expression-preview commands. Enabling monitoring starts browser capture in the owning tab. Automatic reminders
+are not implemented.
 
 ## HTTP and WebSocket Interface
 
 | Endpoint | Transport | Contract |
 | --- | --- | --- |
 | `/` | HTTP GET | Simulator HTML; static assets are served from the same origin |
-| `/health` | HTTP GET | `{"status":"ok","phase":1}` |
+| `/health` | HTTP GET | Service and camera-processor readiness |
 | `/ws` | WebSocket | JSON text commands, state snapshots and validation errors |
+| `/camera/frame` | HTTP POST | Bounded, session-scoped JPEG ingestion |
 
-### State snapshot
+### Camera configuration
 
-A client receives the current snapshot on connection. Every accepted command broadcasts a new snapshot to all connected clients.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `POMO_CAMERA_WIDTH` / `POMO_CAMERA_HEIGHT` | 640 / 480 | Capture target and maximum decoded dimensions |
+| `POMO_CAMERA_FPS` | 10 | Upper sampling target; uploads are sequential |
+| `POMO_CAMERA_JPEG_QUALITY` | 0.75 | Browser JPEG encoding quality |
+| `POMO_CAMERA_MAX_BYTES` | 524288 | Maximum streamed request body |
+| `POMO_CAMERA_TIMEOUT_SECONDS` | 3 | Body/processing deadline and active-source idle timeout |
+| `POMO_CAMERA_STARTUP_SECONDS` | 30 | Initial permission/first-frame allowance |
+| `POMO_CAMERA_MODEL_PATH` | repository `models/face_landmarker.task` | Optional model override |
 
-```json
-{
-  "type": "state",
-  "protocol_version": 1,
-  "monitoring_enabled": false,
-  "display": "ready",
-  "camera_status": "not_implemented",
-  "revision": 0,
-  "dev_controls": true
-}
-```
+Values are validated at startup. Invalid or oversized images are rejected before
+state changes; JPEG dimensions are checked before OpenCV decoding. Only one upload
+is processed at a time; old frames are not queued or replayed.
 
-Display values are `ready`, `possible_absence`, `reminding` and `unavailable`. These are currently manual display previews. A `reminding` display does not imply that reminder logic has run, and an `unavailable` display is separate from WebSocket connection status.
+### Protocol v2
 
-### Commands
+`/health` reports phase 2 and `camera_processor_ready`. `/ws` broadcasts complete
+state snapshots with camera status (`paused`, `starting`, `available`,
+`unavailable`), frame count/dimensions and an owner-only upload session token.
+`POST /camera/frame` accepts bounded raw JPEG requests with session and sequence
+headers. The 4 KB JSON WebSocket channel remains separate from image transport.
 
-```json
-{"type":"set_monitoring","enabled":true}
-{"type":"set_monitoring","enabled":false}
-{"type":"preview_display","display":"possible_absence"}
-```
+Commands are `set_monitoring`, `camera_failed` (owner only), and `preview_display`
+(development controls only). Display values remain `ready`, `possible_absence`,
+`reminding`, `unavailable`; manual previews do not represent detection results.
+Connection health, camera availability and robot display remain independent.
 
-`set_monitoring` requires a strict boolean and resets the display to `ready` for both enable and pause commands. Manual previews are allowed while monitoring is paused when development controls are enabled.
-
-Unknown commands, extra fields, invalid JSON and binary messages produce an error without changing state:
-
-```json
-{"type":"error","code":"invalid_command","message":"Explanation"}
-```
-
-The startup configuration limits WebSocket message size to 4,096 bytes. The application also validates incoming command shape and text length. Oversized messages may close the connection.
-
-### Reconnection and reset semantics
-
-The simulator retries connections after 1, 2, 4 and 8 seconds, then at most every 10 seconds. Receiving a valid snapshot resets the retry delay. Controls stay disabled until a snapshot arrives, and disconnection marks the displayed state as potentially stale.
-
-Reconnecting clients receive the current state. Backend restart resets monitoring to paused, display to `ready` and revision to zero. Offline commands are not queued or replayed.
-
-See [protocol v1](docs/protocol.md) for the transport contract.
+Protocol v2 changes monitoring semantics and snapshot/health fields. Update frontend
+and backend together. See [protocol v2](docs/protocol.md) for exact contracts,
+validation, ownership, timeouts and reconnection behaviour.
 
 ## Verification
 
@@ -193,17 +219,29 @@ conda run --name pomo python -m pytest -q
 conda run --name pomo python -m pip check
 ```
 
-The current four tests cover static/health routes, multi-client broadcasts, reconnect/restart state, malformed commands and disabled previews. They do not validate camera detection, reminder timing or physical hardware.
+Tests cover HTTP/WebSocket contracts, shared state, owner-only camera sessions,
+JPEG validation, backpressure, expiration and cleanup. Core camera tests use a fake
+model lifecycle and synthetic images; they do not require a physical webcam.
+The existing Starlette/HTTPX deprecation warning remains. See [verification
+records](docs/verification.md) for dated checks and limitations.
 
-Recorded checks include fresh and repeated Conda setup, four passing integration tests, dependency consistency and live HTTP/WebSocket communication on macOS ARM64. The current test adapter emits a Starlette/HTTPX deprecation warning. See [verification records](docs/verification.md) for dates and limitations.
+If Node is available, optional client lifecycle checks are:
 
-Manual simulator check:
+```sh
+node --check simulator/app.js
+node --check simulator/camera.js
+node --test tests/test_camera_client.cjs
+```
 
-1. Open the interface and confirm `Connected`.
-2. Enable monitoring and confirm the simulation-only status.
-3. Select each expression and verify its label and face.
-4. Open another tab and verify both clients receive the same state.
-5. Stop and restart the backend; verify controls disable, reconnect and restore the restart defaults.
+Manual Windows-browser check:
+
+1. Open `http://localhost:8000` and confirm Connected.
+2. Enable monitoring and grant camera permission; verify preview and frame count.
+3. Open another tab; verify it observes the camera without acquiring it.
+4. Pause; confirm the browser camera indicator turns off.
+5. Test permission denial, tab hiding, owner tab close and backend restart.
+6. Re-enable explicitly after interruptions; verify a new session and fresh frames.
+7. Preview robot expressions; verify they remain independent of camera status.
 
 ## Deployment Constraints
 
@@ -217,7 +255,9 @@ Forward the configured port privately through the workspace provider. The proxy 
 
 The development server has no authentication, and every connected client can control the shared robot. Keep access restricted through the workspace's access controls.
 
-A remote backend cannot directly open a laptop webcam. Phase 2 must either run capture and processing locally or explicitly implement browser capture and transport.
+Capture happens in the browser, so the backend does not open the laptop webcam.
+On a remote deployment frames travel to that backend; the intended prototype runs
+on the same laptop through localhost. No camera recording is implemented.
 
 ## Repository Structure
 
@@ -225,9 +265,12 @@ A remote backend cannot directly open a laptop webcam. Phase 2 must either run c
 backend/
   app.py              FastAPI factory, command validation and shared state
   __main__.py         Configuration loading and Uvicorn entry point
+  camera.py           Long-lived processing worker and JPEG validation
+  config.py           Validated browser-camera settings
 simulator/
   index.html          Robot display and simulator controls
   app.js              WebSocket client, rendering and reconnection
+  camera.js           Browser capture, preview and sequential JPEG uploads
   style.css           Responsive monochrome interface
 firmware/
   README.md           Future hardware integration notes
@@ -238,6 +281,7 @@ docs/
 scripts/
   setup.sh            Create/update the pomo Conda environment
   dev.sh              Start the backend inside that environment
+  setup_model.py      Download and checksum-verify the versioned model
 tests/
   test_backend.py     HTTP/WebSocket integration tests
 environment.yml       Conda runtime and pinned Python packages
@@ -248,8 +292,9 @@ environment.yml       Conda runtime and pinned Python packages
 
 ### Phase 2: Add Basic Functions
 
-- [ ] Add configurable webcam capture with start/stop lifecycle, development preview and availability/error reporting.
-- [ ] Select and document the detection libraries; implement presence/absence observations for the initial prototype.
+- [x] Implement browser webcam capture, preview, start/stop lifecycle, bounded uploads and availability/error reporting (physical Windows-camera validation pending).
+- [x] Select and document OpenCV 5, MediaPipe Face Landmarker and the versioned model.
+- [ ] Implement presence/absence observations for the initial prototype.
 - [ ] Add timestamps and observation freshness checks; handle poor lighting, uncertain results and temporary tracking loss.
 - [ ] Define backend state transitions and configurable sustained-absence thresholds.
 - [ ] Connect observations to backend decisions and broadcast the resulting display state.

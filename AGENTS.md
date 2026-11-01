@@ -20,7 +20,7 @@ Pomo is a desktop robot study companion. The software prototype uses a browser s
 - **Phase 3: Test and Validate.** Detection evaluation, deterministic behaviour tests, recovery, usability and installation checks.
 - Pomodoro/session controls and voice recognition are deferred. Implement them when requested as a separate task.
 
-The current baseline provides manual display previews and a monitoring flag. Camera capture, automatic detection, reminder policy and firmware are not yet implemented. Verify this baseline against the code before making status claims, and update the documentation as implementation progresses.
+The current baseline provides manual display previews, browser webcam capture, bounded JPEG ingestion, camera ownership and a long-lived processing worker. Automatic detection observations, reminder policy and firmware are not yet implemented. Verify this baseline against the code before making status claims, and update the documentation as implementation progresses.
 
 The initial detection target is whether the user leaves the frame. Presence and head direction do not prove attention or distraction. Camera or connection failure must be represented as unavailable/unknown input rather than user absence.
 
@@ -74,7 +74,7 @@ Preserve these contracts unless the requested task changes them. Update the back
 - All clients currently share one in-memory robot state. Use one backend worker while state remains process-local.
 - Each accepted command increments the revision and broadcasts a complete snapshot. New/reconnecting clients receive current state.
 - Current display identifiers are `ready`, `possible_absence`, `reminding` and `unavailable`. Keep identifiers consistent across Python, JavaScript, tests and docs.
-- Monitoring changes currently reset the display to `ready`. Manual expression previews can run while monitoring is paused when development controls are enabled.
+- Monitoring changes reset the display to `ready`; enabling reserves a browser camera session for the sending WebSocket. Manual expression previews can run while monitoring is paused when development controls are enabled.
 - Manual previews are rendering controls, not detection observations or evidence of a triggered reminder.
 - Controls remain disabled until a valid snapshot arrives. Disconnection marks displayed state stale; offline commands are not queued for replay.
 - Keep connection health, camera availability, monitoring state and display state distinct.

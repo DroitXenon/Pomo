@@ -92,3 +92,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .robot-panel, .controls-panel { padding: 20px; }
 }
+
+.camera-panel { border-bottom: 1px solid #303030; margin-bottom: 24px; padding-bottom: 12px; }
+#camera-preview { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #080808; border: 1px solid #303030; border-radius: 9px; transform: scaleX(-1); }

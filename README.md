@@ -18,8 +18,8 @@ The foundation includes:
 
 Camera foundation (steps 1–4) is implemented: browser capture/preview, bounded
 JPEG uploads, one-tab ownership and a long-lived Python processing worker. Face
-observations and automatic reminders remain planned. Real Windows webcam testing
-is still required.
+observations and sustained-absence reminders are now connected, with head-direction
+and expression diagnostics. Real Windows webcam testing is still required.
 
 The prototype scope is camera detection, robot display and reminders. Pomodoro timing, session controls and voice recognition are deferred.
 
@@ -27,13 +27,13 @@ The prototype scope is camera detection, robot display and reminders. Pomodoro t
 
 Introduce a configurable webcam source and camera availability reporting. The first detection target is whether the user leaves the frame. Presence observations indicate possible absence; they do not establish concentration or distraction.
 
-Connect observations to a backend state machine with configurable duration thresholds, reminder dismissal, cooldowns and monitoring pause/resume. Keep connection health independent of detection state. Provide distinct display states, simulated observation inputs, diagnostic logs and an optional sound cue with mute control.
+Connect observations to a backend state machine with configurable duration thresholds, reminder dismissal and monitoring pause/resume. Keep connection health independent of detection state. Provide distinct display states, simulated observation inputs, diagnostic logs and an optional sound cue with mute control.
 
 Completion requires the camera or simulated observations to drive backend decisions and simulator expressions, including recovery from unavailable or stale input. Raw camera images and video should not be stored by default.
 
 ### Phase 3: Test and Validate
 
-Validate camera lifecycle and permissions, detection under different lighting and user positions, state transitions, reminder timing and interruption recovery. Add deterministic tests for thresholds, cooldowns, dismissal and pause/resume using simulated observations.
+Validate camera lifecycle and permissions, detection under different lighting and user positions, state transitions, reminder timing and interruption recovery. Add deterministic tests for thresholds, dismissal and pause/resume using simulated observations.
 
 Run a reproducible end-to-end demonstration, conduct a small teammate usability check, verify installation on another machine and document false reminders, missed events and known limitations. Record the next steps for physical robot integration and review working changes before merging into `main`.
 
@@ -80,20 +80,45 @@ uploads and server timeouts release/invalidate capture. Re-enable explicitly to
 resume. Permission requests completing after cancellation release their tracks.
 
 The processing worker loads Face Landmarker once at startup and closes it on
-shutdown. This milestone only decodes frames and reports transport availability;
-loading the model does not enable face observations or reminder decisions.
+shutdown. Each usable frame runs Face Landmarker on that worker. Small timestamped
+observations drive a separate backend policy; raw frames remain outside shared state.
 
-### Planned detection flow
+### Detection and behaviour flow
 
 ```text
-Configurable camera source or simulated observations
+Browser camera frames (synthetic observations in automated tests)
   → presence detection and timestamped observations
-  → backend behaviour policy: duration, cooldown, dismissal
+  → backend behaviour policy: duration and dismissal
   → display state
   → browser simulator / future physical robot adapter
 ```
 
-The observation pipeline and behaviour policy are the next Phase 2 steps. The `firmware/` directory currently contains integration notes; it does not contain a working hardware adapter.
+The observation pipeline and sustained-absence policy are implemented; physical-camera evaluation remains pending. The `firmware/` directory currently contains integration notes; it does not contain a working hardware adapter.
+
+### Presence observations and reminders
+
+Enable monitoring and remain visible for at least 0.5 seconds to establish a face
+baseline. Brief non-detection is tolerated for 1 second. Continued non-detection
+shows `possible_absence`; after 10 continuous seconds it shows a supportive reminder.
+These values are configurable. A stable return clears the reminder. Dismissal
+clears it and resets the absence countdown.
+
+Low light, overexposure, low detail/blur, stale results and camera failures are
+unknown/unavailable input, not absence. They cancel pending absence and require
+a fresh visible-face baseline before further absence reminders. No reminder is
+triggered solely by waiting without fresh observations. Pausing releases capture
+and clears evidence.
+
+The camera panel shows face presence, quality reasons, absence duration
+and selected facial movement scores. Head direction and yaw/pitch/roll angles are estimated automatically relative to
+the camera. Head direction and blendshape scores do not trigger reminders or establish
+attention, emotion or identity. The face box is a development overlay.
+
+Quality thresholds are heuristics and have not been tuned on a physical webcam.
+A plain background can look like a low-detail/blurred image and suppress absence
+reminders. Set `POMO_PERCEPTION_MIN_BLUR_VARIANCE=0` to disable that particular
+check when evaluating such a scene. Face turned away or occluded can appear absent;
+the system measures face visibility rather than proving the user left.
 
 ## Runtime and Dependencies
 
@@ -103,7 +128,7 @@ The observation pipeline and behaviour policy are the next Phase 2 steps. The `f
 | HTTP and validation | FastAPI 0.162.0, Pydantic 2.14.1 | Routes, command schema and input validation |
 | Server and transport | Uvicorn 0.54.0, websockets 17.3 | ASGI serving and WebSocket connections |
 | Interface | Plain HTML, CSS and JavaScript | Robot rendering and development controls |
-| Camera processing | OpenCV contrib 5.0.0.93, MediaPipe 1.2.0 | JPEG decoding; loaded Face Landmarker for future perception |
+| Camera processing | OpenCV contrib 5.0.0.93, MediaPipe 1.2.0 | JPEG decoding, face landmarks, head pose and expression diagnostics |
 | Configuration | python-dotenv 1.2.4 | Local configuration with environment overrides |
 | Tests | pytest 9.1.1, HTTPX 0.28.1 | HTTP/WebSocket integration checks |
 
@@ -144,10 +169,10 @@ For an existing environment, update it instead of creating it again:
 conda env update --name pomo --file environment.yml --format cep-24 --prune
 ```
 
-The original setup was verified on macOS ARM64. The camera environment update and
-model initialization are verified on WSL2 Linux x86-64. The updated environment
+The original setup was verified on macOS ARM64. Camera environment setup and
+model initialization are verified on WSL2 Linux x86-64. The environment
 uses CEP-24 platform selectors for Linux EGL/GLES; Windows/macOS setup with the
-new camera dependencies still requires validation.
+camera dependencies still requires validation.
 
 ## Configuration
 
@@ -165,8 +190,7 @@ Example shell override:
 POMO_PORT=8001 POMO_DEV_CONTROLS=false sh scripts/dev.sh
 ```
 
-Disabling development controls rejects expression-preview commands. Enabling monitoring starts browser capture in the owning tab. Automatic reminders
-are not implemented.
+Disabling development controls rejects expression-preview commands. Enabling monitoring starts browser capture in the owning tab. Sustained-absence reminders run only with fresh, usable observations.
 
 ## HTTP and WebSocket Interface
 
@@ -193,7 +217,27 @@ Values are validated at startup. Invalid or oversized images are rejected before
 state changes; JPEG dimensions are checked before OpenCV decoding. Only one upload
 is processed at a time; old frames are not queued or replayed.
 
-### Protocol v2
+### Detection configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `POMO_TRACKING_LOSS_GRACE_SECONDS` | 1 | Tolerate brief non-detection; included in absence duration |
+| `POMO_ABSENCE_SECONDS` | 10 | Continuous non-detection before reminding |
+| `POMO_RETURN_SECONDS` | 0.5 | Stable face presence for arming and return |
+| `POMO_OBSERVATION_MAX_AGE_SECONDS` | 1 | Maximum age/gap of usable evidence |
+| `POMO_PERCEPTION_DETECTION_CONFIDENCE` | 0.5 | MediaPipe detection threshold |
+| `POMO_PERCEPTION_PRESENCE_CONFIDENCE` | 0.5 | MediaPipe face-presence threshold |
+| `POMO_PERCEPTION_TRACKING_CONFIDENCE` | 0.5 | MediaPipe tracking threshold |
+| `POMO_PERCEPTION_MIN_BRIGHTNESS` / `POMO_PERCEPTION_MAX_BRIGHTNESS` | 35 / 230 | Usable grayscale mean range |
+| `POMO_PERCEPTION_MIN_BLUR_VARIANCE` | 15 | Minimum Laplacian variance; 0 disables |
+| `POMO_PERCEPTION_YAW_DEGREES` / `POMO_PERCEPTION_PITCH_DEGREES` | 30 / 25 | Direction thresholds relative to the camera |
+| `POMO_PERCEPTION_HYSTERESIS_DEGREES` | 5 | Direction exit margin to reduce flicker |
+
+Choose freshness limits above the expected upload interval plus processing latency.
+Processing results older than the observation limit are unknown even when the
+camera transport remains available. All timing uses the backend's monotonic clock.
+
+### Protocol v4
 
 `/health` reports phase 2 and `camera_processor_ready`. `/ws` broadcasts complete
 state snapshots with camera status (`paused`, `starting`, `available`,
@@ -202,12 +246,13 @@ state snapshots with camera status (`paused`, `starting`, `available`,
 headers. The 4 KB JSON WebSocket channel remains separate from image transport.
 
 Commands are `set_monitoring`, `camera_failed` (owner only), and `preview_display`
-(development controls only). Display values remain `ready`, `possible_absence`,
+(development controls only), plus `dismiss_reminder`. Snapshots
+add observation, head-direction and behaviour diagnostics. Display values remain `ready`, `possible_absence`,
 `reminding`, `unavailable`; manual previews do not represent detection results.
 Connection health, camera availability and robot display remain independent.
 
-Protocol v2 changes monitoring semantics and snapshot/health fields. Update frontend
-and backend together. See [protocol v2](docs/protocol.md) for exact contracts,
+Protocol v4 defines the camera, observation and behaviour contracts. Update
+frontend and backend together. See [protocol v4](docs/protocol.md) for exact contracts,
 validation, ownership, timeouts and reconnection behaviour.
 
 ## Verification
@@ -230,7 +275,7 @@ If Node is available, optional client lifecycle checks are:
 ```sh
 node --check simulator/app.js
 node --check simulator/camera.js
-node --test tests/test_camera_client.cjs
+node --test tests/test_camera_client.cjs tests/test_simulator.cjs
 ```
 
 Manual Windows-browser check:
@@ -242,6 +287,12 @@ Manual Windows-browser check:
 5. Test permission denial, tab hiding, owner tab close and backend restart.
 6. Re-enable explicitly after interruptions; verify a new session and fresh frames.
 7. Preview robot expressions; verify they remain independent of camera status.
+8. Stay visible until Face visible; check automatic direction and angles by turning
+   left/right/up/down.
+9. Leave the frame for over 10 seconds in a usable scene; verify a reminder, dismissal
+   and a fresh absence countdown. Return for at least 0.5 seconds and check recovery.
+10. Test darkness/occlusion and interrupted uploads; confirm uncertain/stale input
+    clears the countdown and requires a fresh face baseline.
 
 ## Deployment Constraints
 
@@ -266,7 +317,10 @@ backend/
   app.py              FastAPI factory, command validation and shared state
   __main__.py         Configuration loading and Uvicorn entry point
   camera.py           Long-lived processing worker and JPEG validation
-  config.py           Validated browser-camera settings
+  config.py           Validated camera, perception and behaviour settings
+  observations.py     Timestamped observation schema
+  perception.py       Face Landmarker and head-direction diagnostics
+  behaviour.py        Camera-independent sustained-absence policy
 simulator/
   index.html          Robot display and simulator controls
   app.js              WebSocket client, rendering and reconnection
@@ -294,20 +348,21 @@ environment.yml       Conda runtime and pinned Python packages
 
 - [x] Implement browser webcam capture, preview, start/stop lifecycle, bounded uploads and availability/error reporting (physical Windows-camera validation pending).
 - [x] Select and document OpenCV 5, MediaPipe Face Landmarker and the versioned model.
-- [ ] Implement presence/absence observations for the initial prototype.
-- [ ] Add timestamps and observation freshness checks; handle poor lighting, uncertain results and temporary tracking loss.
-- [ ] Define backend state transitions and configurable sustained-absence thresholds.
-- [ ] Connect observations to backend decisions and broadcast the resulting display state.
-- [ ] Implement reminder dismissal, cooldown, pause/resume and recovery when the user returns.
+- [x] Implement presence/absence observations for the initial prototype.
+- [x] Add timestamps and observation freshness checks; handle poor lighting, uncertain results and temporary tracking loss.
+- [x] Define backend state transitions and configurable sustained-absence thresholds.
+- [x] Connect observations to backend decisions and broadcast the resulting display state.
+- [x] Implement reminder dismissal, pause/resume and recovery when the user returns.
 - [ ] Add an optional sound cue with mute control.
-- [ ] Add simulated observation events and diagnostics for observation duration, cooldown, reminders and errors.
-- [ ] Stop reminders on unavailable input and discard stale observations after interruptions; keep camera recording disabled by default.
+- [x] Add diagnostics for observation duration, detection state and errors.
+- [ ] Add interactive simulated observation inputs (synthetic observations already cover automated tests).
+- [x] Stop reminders on unavailable input and discard stale observations after interruptions; keep camera recording disabled by default.
 
 ### Phase 3: Test and Validate
 
 - [ ] Test missing/busy cameras, denied permission, resource release and recovery after interruption.
 - [ ] Evaluate leaving the frame, looking away and reading notes across lighting conditions, distances and head positions; record false reminders and missed events.
-- [ ] Add camera-independent tests for thresholds, cooldown, dismissal, pause/resume and unavailable input.
+- [x] Add camera-independent tests for thresholds, dismissal, pause/resume and unavailable input.
 - [ ] Validate backend, simulator and camera restart/disconnection sequences without replaying old reminders.
 - [ ] Demonstrate enable monitoring → observations → sustained absence → reminder → dismissal → recovery, using both camera and simulated input.
 - [ ] Have teammates test installation and usability; record whether controls and reminder frequency are understandable and acceptable.

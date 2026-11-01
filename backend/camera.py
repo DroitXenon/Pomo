@@ -1,26 +1,23 @@
-"""Long-lived, single-thread processor. Frames and model stay in memory.
-
-Face observations are deliberately deferred: the loaded model is available to
-extend this processor in the next perception step.
-"""
+"""Long-lived image decoder and perception worker; frames stay in memory."""
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
-from .config import CameraConfig
+from .config import CameraConfig, PerceptionConfig
+from .perception import FacePerception
 
 
 class FrameProcessor:
-    def __init__(self, config: CameraConfig):
+    def __init__(self, config: CameraConfig, perception_config: PerceptionConfig | None = None):
         self.config = config
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='pomo-camera')
-        self.model = None
+        self.perception = None
+        self.perception_config = perception_config or PerceptionConfig()
 
     def open(self):
-        import mediapipe as mp
-        self.model = mp.tasks.vision.FaceLandmarker.create_from_options(
-            mp.tasks.vision.FaceLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=str(self.config.model_path)),
-                running_mode=mp.tasks.vision.RunningMode.VIDEO))
+        self.perception = FacePerception(self.perception_config, self.config.model_path)
+
+    def analyse(self, rgb):
+        return self.perception.analyse(rgb)
 
     def process(self, encoded: bytes):
         import cv2
@@ -40,9 +37,10 @@ class FrameProcessor:
         if frame is None:
             raise ValueError('JPEG decode failed')
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        return {'width': rgb.shape[1], 'height': rgb.shape[0]}
+        return {'width': rgb.shape[1], 'height': rgb.shape[0],
+                'observation': self.analyse(rgb)}
 
     def close(self):
-        if self.model is not None:
-            self.model.close()
-            self.model = None
+        if self.perception is not None:
+            self.perception.close()
+            self.perception = None

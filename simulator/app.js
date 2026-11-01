@@ -19,6 +19,7 @@ function log(text) {
 }
 function controls(connected) {
   $("monitor").disabled = !connected;
+  $("dismiss-reminder").disabled = !connected || !state?.behaviour?.reminder_active;
   document.querySelectorAll("[data-preview]").forEach((button) => {
     button.disabled = !connected || !state?.dev_controls;
   });
@@ -29,12 +30,52 @@ function render(next) {
   $("state-title").textContent = displayLabels[state.display];
   $("monitor").textContent = state.monitoring_enabled ? "Pause monitoring" : "Enable monitoring";
   $("monitor").setAttribute("aria-pressed", String(state.monitoring_enabled));
-  $("monitor-status").textContent = state.monitoring_enabled ? "Camera monitoring enabled · detection pending" : "Monitoring paused";
+  $("monitor-status").textContent = state.monitoring_enabled ? "Camera monitoring enabled" : "Monitoring paused";
   $("revision").textContent = state.revision;
   document.querySelectorAll("[data-preview]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.preview === state.display)));
   $("feedback").textContent = state.dev_controls ? "" : "Expression controls disabled.";
   controls(true);
   camera.update(state);
+  renderDetection(state);
+}
+function renderDetection(next) {
+  const observation = next.observation;
+  const behaviour = next.behaviour || {};
+  const statuses = {
+    paused: "Detection paused", unavailable: "Camera unavailable",
+    awaiting_face: "Waiting for a visible face before monitoring absence",
+    confirming_face: "Confirming face presence", present: "Face visible",
+    tracking_loss: "Brief face tracking loss", possible_absence: "Possible absence",
+    reminding: "Sustained face absence",
+    uncertain: "Input uncertain · reminders suspended", stale: "Input stale · reminders suspended"
+  };
+  const reasons = {usable: "Usable", no_face: "No face detected", low_light: "Low light",
+    overexposed: "Overexposed", low_detail_or_blur: "Low detail or blur", invalid_landmarks: "Uncertain landmarks"};
+  $("detection-status").textContent = statuses[behaviour.status] || "Waiting for observations";
+  $("face-presence").textContent = {present: "Present", not_detected: "Not detected", unknown: "Unknown"}[observation?.presence] || "Unknown";
+  $("head-direction").textContent = next.head_direction || "unknown";
+  const pose = observation?.head_pose;
+  $("head-angles").textContent = pose ? `Yaw ${pose.yaw.toFixed(0)}° / pitch ${pose.pitch.toFixed(0)}° / roll ${pose.roll.toFixed(0)}°` : "—";
+  $("image-quality").textContent = reasons[observation?.reason] || "—";
+  $("absence-duration").textContent = `${behaviour.absence_seconds || 0} s`;
+  $("expression-scores").textContent = Object.entries(observation?.blendshapes || {})
+    .map(([name, score]) => `${name}: ${score.toFixed(2)}`).join(" · ") || "—";
+  $("reminder-message").hidden = !behaviour.reminder_active;
+  $("dismiss-reminder").hidden = !behaviour.reminder_active;
+  const overlay = $("face-overlay");
+  const context = overlay.getContext("2d");
+  context.clearRect(0, 0, overlay.width, overlay.height);
+  if (next.camera_session && observation?.presence === "present" && observation.face_box && next.last_frame) {
+    const {width, height} = next.last_frame;
+    const scale = Math.min(overlay.width / width, overlay.height / height);
+    const offsetX = (overlay.width - width * scale) / 2;
+    const offsetY = (overlay.height - height * scale) / 2;
+    const [left, top, right, bottom] = observation.face_box;
+    context.strokeStyle = "#fff";
+    context.lineWidth = 2;
+    context.strokeRect(offsetX + left * width * scale, offsetY + top * height * scale,
+                       (right - left) * width * scale, (bottom - top) * height * scale);
+  }
 }
 function connect() {
   if (stopped) return;
@@ -48,13 +89,15 @@ function connect() {
   socket.onmessage = ({data}) => {
     try {
       const message = JSON.parse(data);
-      if (message.type === "state" && message.protocol_version === 2 && displayLabels[message.display]) {
+      if (message.type === "state" && message.protocol_version === 4 && displayLabels[message.display]) {
         clearTimeout(connectTimer);
         attempts = 0;
         $("connection").textContent = "Connected";
         $("connection").dataset.connected = "true";
+        const changed = !state || state.display !== message.display ||
+          state.camera_status !== message.camera_status || state.behaviour?.status !== message.behaviour?.status;
         render(message);
-        log(`State ${message.revision}: ${message.display}`);
+        if (changed) log(`State ${message.revision}: ${message.display} · ${message.behaviour?.status || message.camera_status}`);
       } else if (message.type === "error") {
         $("feedback").textContent = message.message;
         log(`Command rejected: ${message.code}`);
@@ -66,6 +109,8 @@ function connect() {
     clearTimeout(connectTimer);
     controls(false);
     camera.stop();
+    $("detection-status").textContent = "Disconnected · observations may be stale";
+    $("face-overlay").getContext("2d").clearRect(0, 0, 640, 480);
     $("camera-status").textContent = "Camera stopped · backend disconnected";
     $("connection").textContent = "Disconnected";
     $("connection").dataset.connected = "false";
@@ -81,6 +126,7 @@ function send(command) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify(command));
 }
+$("dismiss-reminder").onclick = () => send({type: "dismiss_reminder"});
 $("monitor").onclick = () => send({type: "set_monitoring", enabled: !state.monitoring_enabled});
 document.querySelectorAll("[data-preview]").forEach((button) => {
   button.onclick = () => send({type: "preview_display", display: button.dataset.preview});

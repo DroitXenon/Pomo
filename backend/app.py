@@ -1,4 +1,4 @@
-"""Shared robot transport and browser-camera lifecycle; no reminder policy yet."""
+"""Shared robot transport, camera lifecycle and observation-driven behaviour."""
 import asyncio
 from contextlib import asynccontextmanager, suppress
 import json
@@ -13,7 +13,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
 
 from .camera import FrameProcessor
-from .config import CameraConfig
+from .config import CameraConfig, PerceptionConfig, BehaviourConfig
+from .observations import Observation
+from .perception import HeadDirection
+from .behaviour import Behaviour
 
 LOG = logging.getLogger('pomo')
 Display = Literal['ready', 'possible_absence', 'reminding', 'unavailable']
@@ -21,18 +24,24 @@ Display = Literal['ready', 'possible_absence', 'reminding', 'unavailable']
 
 class Command(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    type: Literal['set_monitoring', 'preview_display', 'camera_failed']
+    type: Literal['set_monitoring', 'preview_display', 'camera_failed', 'dismiss_reminder']
     enabled: StrictBool | None = None
     display: Display | None = None
 
 
 def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None = None,
-               processor_factory=FrameProcessor, clock=time.monotonic) -> FastAPI:
+               processor_factory=None, clock=time.monotonic,
+               perception_config: PerceptionConfig | None = None,
+               behaviour_config: BehaviourConfig | None = None) -> FastAPI:
     config = camera_config or CameraConfig()
-    processor = processor_factory(config)
+    perception_config = perception_config or PerceptionConfig()
+    policy = Behaviour(behaviour_config or BehaviourConfig())
+    head = HeadDirection(perception_config)
+    processor = (processor_factory(config) if processor_factory else
+                 FrameProcessor(config, perception_config))
     state = {'monitoring_enabled': False, 'display': 'ready',
              'camera_status': 'paused', 'revision': 0, 'frames_received': 0,
-             'last_frame': None}
+             'last_frame': None, 'observation': None, 'head_direction': 'unknown'}
     clients: set[WebSocket] = set()
     lock = asyncio.Lock()
     owner = None
@@ -44,8 +53,9 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
     active_job = None
 
     def snapshot(peer=None):
-        return {'type': 'state', 'protocol_version': 2, **state,
+        return {'type': 'state', 'protocol_version': 4, **state,
                 'dev_controls': dev_controls, 'camera_settings': config.browser_settings(),
+                'behaviour': policy.snapshot(),
                 'camera_session': session if peer is owner else None}
 
     async def broadcast():
@@ -60,8 +70,11 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
         nonlocal owner, session, last_sequence
         owner = session = None
         last_sequence = -1
+        policy.reset(unavailable=status == 'unavailable')
+        head.reset()
         state.update(monitoring_enabled=False, camera_status=status,
-                     frames_received=0, last_frame=None, display='ready')
+                     frames_received=0, last_frame=None, display=policy.display,
+                     observation=None, head_direction='unknown')
 
     async def watchdog():
         while True:
@@ -71,6 +84,13 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                          else config.timeout_seconds)
                 if owner is not None and (owner not in clients or clock() - last_input > limit):
                     reset('unavailable')
+                    state['revision'] += 1
+                    await broadcast()
+                previous_status = policy.status
+                policy.tick(clock())
+                if policy.status != previous_status:
+                    state.update(display=policy.display, observation=None, head_direction='unknown')
+                    head.classify(None)
                     state['revision'] += 1
                     await broadcast()
 
@@ -83,7 +103,8 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
             worker_ready = True
         except Exception:
             LOG.exception('Camera processor initialization failed; check dependencies and model')
-            state['camera_status'] = 'unavailable'
+            policy.reset(unavailable=True)
+            state.update(camera_status='unavailable', display=policy.display)
         timer = asyncio.create_task(watchdog())
         try:
             yield
@@ -142,9 +163,19 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
             async with lock:
                 if token != session or clock() - received > config.timeout_seconds:
                     raise HTTPException(409, 'Frame expired during processing')
+                observation = Observation(observed_at=received, processed_at=clock(),
+                                          **result.get('observation', {'presence': 'unknown',
+                                                                      'reason': 'missing_result'}))
                 last_input = clock()
+                if last_input - received > policy.config.observation_max_age_seconds:
+                    observation = Observation(observed_at=received, processed_at=last_input,
+                                              presence='unknown', reason='stale')
+                policy.observe(observation, last_input)
+                direction = head.classify(observation.head_pose if observation.presence == 'present' else None)
+                state.update(observation=observation.model_dump(), display=policy.display,
+                             head_direction=direction)
                 state.update(camera_status='available', frames_received=state['frames_received'] + 1,
-                             last_frame={**result, 'sequence': sequence})
+                             last_frame={'width': result['width'], 'height': result['height'], 'sequence': sequence})
                 state['revision'] += 1
                 await broadcast()
             return {'accepted': True, 'sequence': sequence}
@@ -200,7 +231,7 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                         if not dev_controls:
                             raise ValueError('Developer controls are disabled')
                     elif command.enabled is not None or command.display is not None:
-                        raise ValueError('camera_failed accepts no fields')
+                        raise ValueError(f'{command.type} accepts no fields')
                     async with lock:
                         if command.type == 'set_monitoring':
                             if command.enabled:
@@ -210,6 +241,9 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                                     raise ValueError('Camera is already owned by a monitoring tab')
                                 owner, session = ws, secrets.token_urlsafe(32)
                                 last_sequence, last_input = -1, clock()
+                                policy.reset(enabled=True)
+                                head.reset()
+                                state.update(observation=None, head_direction='unknown')
                                 state.update(monitoring_enabled=True, display='ready',
                                              camera_status='starting', frames_received=0, last_frame=None)
                             else:
@@ -218,6 +252,9 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                             if owner is not ws:
                                 raise ValueError('Only the camera owner can report capture failure')
                             reset('unavailable')
+                        elif command.type == 'dismiss_reminder':
+                            policy.dismiss()
+                            state['display'] = policy.display
                         else:
                             state['display'] = command.display
                         state['revision'] += 1

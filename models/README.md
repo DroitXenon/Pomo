@@ -10,5 +10,5 @@ Downloaded binaries are ignored by Git; camera frames are never stored here.
 - Model information: https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker#models
 
 The application loads the model once on its dedicated worker and closes it during
-shutdown. This milestone decodes frames and reports transport availability only;
-face observations and reminder decisions are deferred.
+shutdown. Face Landmarker runs on usable frames; timestamped observations feed a separate
+sustained-absence policy. Poor-quality frames are unknown input.

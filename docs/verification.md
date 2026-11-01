@@ -39,33 +39,45 @@ Verified on macOS ARM64 with Conda 25.1.1 and Python 3.13.18:
 
 Conda setup on Windows and Linux has not been verified.
 
-## 2026-10-31 — WSL browser-camera foundation (steps 1–4)
+## Camera, observations and behaviour — 31 October–1 November 2026
 
-- Worked in `/home/vivian/pomo` on the existing `feature/camera` branch, using
-  the activated `pomo` environment (Python 3.13.18).
-- Installed OpenCV contrib 5.0.0.93 and MediaPipe 1.2.0. Resolved MediaPipe's
-  missing `libGLESv2.so.2` with Linux-only EGL/GLES Conda dependencies declared
-  in `environment.yml`; setup uses CEP-24 selectors (Conda 26.9.4).
-- Environment update via `sh scripts/setup.sh` and checksum verification passed.
-  Model float16 revision 1 was downloaded from Google's official model bucket;
-  exact URL and SHA-256 are recorded in `models/README.md`.
-- Real-model app smoke check: startup readiness, HTTP JPEG ingestion, WebSocket
-  camera availability, pause and shutdown passed.
-- Real OpenCV import, synthetic JPEG decode/BGR-to-RGB conversion, model creation,
-  blank-image inference (zero faces) and model close passed on the dedicated
-  worker. Native MediaPipe informational/warning messages appeared.
-- Backend integration suite: **18 passed**, with the pre-existing
-  Starlette/HTTPX deprecation warning. Tests cover shared state, ownership, malformed/oversized
-  images, replayed sequences, owner disconnect, watchdog expiration, backpressure,
-  processing timeout, pause during processing and initialization/processing errors.
-- `python -m pip check`: no broken requirements. JavaScript syntax checks and
-  `node --test tests/test_camera_client.cjs` passed using a locally downloaded,
-  ignored Node 22.14.0 executable. Three client tests passed; they exercise late permission grants,
-  sequential uploads, abort/track cleanup and permission-denial messaging with mocks.
+Implemented in `/home/vivian/pomo` on `feature/camera`, using the activated `pomo`
+environment with Python 3.13.18, OpenCV contrib 5.0.0.93 and MediaPipe 1.2.0.
+
+### Environment and model
+
+- Conda setup with CEP-24 selectors passed using Conda 26.9.4. Linux-only EGL/GLES
+  dependencies support MediaPipe in WSL. Model float16 revision 1 checksum passed;
+  source and SHA-256 are recorded in `models/README.md`.
+- Real-model smoke checks passed for initialization, JPEG decoding, RGB conversion,
+  inference, HTTP ingestion, WebSocket snapshots, pause and shutdown. A detailed
+  synthetic noise scene produced no face/awaiting-face; a black scene produced
+  unknown/low-light without a reminder. Images stayed in memory.
+- `python -m pip check`: no broken requirements.
+
+### Automated checks
+
+- Backend suite: **46 passed**, with the existing Starlette/HTTPX deprecation
+  warning. Tests cover frame validation, ownership, ordering, backpressure,
+  expiration, worker lifecycle, observations, head angles/direction, continuous
+  absence, stable return, dismissal and uncertain/stale/unavailable input.
+- Policy tests use synthetic observations and explicit monotonic times without a
+  physical camera or timing sleeps. HTTP/WebSocket integration covers automatic
+  direction and stale inference.
+- Seven mocked Node tests passed: three capture-lifecycle tests and four simulator
+  rendering tests. JavaScript syntax checks passed for both modules. Node 22.14.0
+  is an ignored local verification utility, not an application runtime dependency.
 - `sh -n scripts/setup.sh scripts/dev.sh` and `git diff --check` passed.
-- HTTP/WebSocket tests require execution outside this tool sandbox: sandboxed
-  Starlette TestClient stalled creating its event-loop portal before app startup.
-  No application workaround was added for that tooling restriction.
-- Physical Windows webcam access, browser layout/accessibility, real browser
-  permissions, tab lifecycle, Windows/macOS installation and HTTPS forwarding have
-  **not** been validated. No face observations or automatic reminders are enabled.
+- HTTP/WebSocket checks require execution outside this tool sandbox: sandboxed
+  Starlette TestClient stalls in its event-loop portal before application startup.
+
+### Physical validation pending
+
+- Windows-browser webcam access, permission/tab lifecycle, resource release,
+  responsive layout, accessibility, Windows/macOS installation and HTTPS forwarding.
+- Face detection accuracy, head-direction signs and
+  lighting/blur thresholds on a physical webcam. Plain backgrounds can be classified
+  as low detail; the blur gate is configurable for evaluation.
+- Head direction and yaw/pitch/roll are automatic camera-relative diagnostics.
+  Facial movement scores do not establish
+  attention, emotion or identity and do not trigger reminders.

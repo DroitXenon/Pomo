@@ -21,14 +21,22 @@ No Node runtime, database or external fonts are required.
 Camera foundation uses `opencv-contrib-python==5.0.0.93` and `mediapipe==1.2.0`.
 Only one OpenCV distribution is installed; MediaPipe already depends on contrib.
 Pillow validates JPEG headers before OpenCV allocates the decoded image. NumPy,
-Pillow and all newly resolved Python dependencies are pinned in `environment.yml`.
+Pillow and the camera-processing Python dependencies are pinned in `environment.yml`.
 Linux EGL/GLES native libraries are declared using CEP-24 comment selectors;
 setup uses `--format cep-24` (verified with Conda 26.9.4).
 
 A Windows browser owns getUserMedia capture and the direct video preview. WSL
 receives sequential bounded JPEG HTTP uploads; it does not need camera passthrough.
 One dedicated worker initializes the model, decodes frames and closes the model.
-Face observations and reminder policy remain deferred. The model manifest is in
+MediaPipe Face Landmarker emits presence, head-pose and selected blendshape
+diagnostics. A separate deterministic policy handles sustained absence. Quality
+heuristics gate unusable frames; head direction and expressions do not remind.
+The model manifest is in
 `models/README.md`; setup verifies its fixed revision and checksum.
 
 UI choices do not commit the firmware to a browser stack.
+
+Face Landmarker uses the Tasks API with VIDEO mode and strictly increasing
+worker timestamps, with blendshapes and transformation matrices enabled. Model
+confidence options are thresholds rather than fabricated output confidence scores.
+Reference: https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/python

@@ -1,9 +1,9 @@
-# Protocol v2
+# Protocol v4
 
 The browser connects to `/ws` on the page origin (WSS on HTTPS). JSON text commands
 remain limited to 4,096 bytes. Images use a separate bounded HTTP endpoint.
-Protocol v2 replaces the simulation-only monitoring flag with browser camera
-ownership and changes health/snapshot fields; update browser and backend together.
+Monitoring uses browser camera ownership and shared state snapshots. Update
+browser and backend together.
 
 ## Snapshots and commands
 
@@ -13,7 +13,7 @@ increment revision. All clients share one process-local robot; use one server wo
 
 ```json
 {
-  "type": "state", "protocol_version": 2,
+  "type": "state", "protocol_version": 4,
   "monitoring_enabled": false, "display": "ready",
   "camera_status": "paused", "revision": 0,
   "dev_controls": true, "camera_session": null,
@@ -57,7 +57,7 @@ Sequence is a nonnegative ASCII decimal of at most 16 digits, scoped to the sess
 Never log or persist frame bytes or session tokens.
 
 The server bounds streamed request bytes (default 512 KiB), validates JPEG header
-dimensions before decoding, and runs decode/BGR-to-RGB conversion on its dedicated
+dimensions before decoding, and runs decode/BGR-to-RGB conversion and Face Landmarker on its dedicated
 worker. Frames must fit the configured width and height. There is one in-flight
 body/decode operation across clients, with no processing queue. A timed-out native
 job retains that slot until it completes. Session and age are checked again before
@@ -83,7 +83,7 @@ and restart. `/health` otherwise reports `{"status":"ok","phase":2,
 A watchdog expires sessions after the startup allowance (default 30 seconds) or,
 after the first accepted frame, the idle allowance (default 3 seconds). Deadlines
 use backend monotonic time; browser timestamps are not compared with that clock.
-This is transport freshness, not the later observation/absence timing policy.
+This transport timeout is independent of the shorter observation-freshness limit.
 
 The browser releases media tracks on pause, capture/upload failure, owner-session
 loss, WebSocket disconnection, pagehide and tab hiding. Hidden tabs pause shared
@@ -94,5 +94,80 @@ offline. Backend restart resets monitoring and sessions.
 
 The preview comes directly from the browser's video stream and is mirrored only
 for display; uploaded pixels are unmirrored. Permissions require localhost or HTTPS.
-WSL does not need a `/dev/video*` device. No automatic face detection, identity
-recognition or reminder policy is exposed by this milestone.
+WSL does not need a `/dev/video*` device. Face presence drives the sustained-absence policy described below. Identity
+recognition is not implemented.
+
+
+## Observation and behaviour fields
+
+An accepted frame provides `observation`, `head_direction` and a `behaviour`
+diagnostic object in snapshots.
+
+```json
+{
+  "observation": {
+    "observed_at": 100.0, "processed_at": 100.04,
+    "presence": "present", "reason": "usable",
+    "brightness": 115.2, "blur_variance": 210.4,
+    "head_pose": {"yaw": 2.0, "pitch": -3.0, "roll": 0.0},
+    "face_box": [0.2, 0.1, 0.8, 0.9],
+    "blendshapes": {"jawOpen": 0.1}
+  },
+  "head_direction": "forward",
+  "behaviour": {
+    "status": "present", "armed": true, "absence_seconds": 0,
+    "reminder_active": false
+  }
+}
+```
+
+`observation` is null before input, on pause/session loss and when the watchdog
+marks input stale. `presence` is `present`, `not_detected` or `unknown`.
+Reasons include `usable`, `no_face`, `low_light`, `overexposed`,
+`low_detail_or_blur`, `invalid_landmarks`, `stale`. Optional diagnostics default to
+null/empty. `observed_at` is backend request-receipt monotonic time, not a browser
+capture timestamp. `processed_at` is backend completion time. Sequence/session
+validation remains part of ingestion. Neither timestamps nor image quality metrics
+are model confidence scores. A late inference becomes unknown and cannot remind.
+
+Head pose uses XYZ Euler rotation from the scale-normalized canonical-to-face
+matrix: yaw around Y, pitch around X, roll around Z, in degrees. Direction is
+relative to the camera-facing canonical pose by default, with configurable exit
+hysteresis. Direction and raw angles are camera-relative.
+Positive yaw is labelled subject-left and positive pitch down; physical-camera
+validation of these conventions remains pending. Missing pose gives `unknown`.
+`face_box` is normalized left/top/right/bottom; only the owner draws it over their
+mirrored preview. Blendshapes contain selected movement scores, never emotion,
+attention or identity labels. Head pose and blendshapes cannot trigger reminders.
+
+```json
+{"type":"dismiss_reminder"}
+```
+
+`dismiss_reminder` takes no additional fields. Any connected client may dismiss the
+shared reminder. Dismissal requires an actual policy reminder; a manual display
+preview is not dismissible. Invalid requests return `invalid_command` and leave
+revision/state unchanged.
+
+Policy status values: `paused`, `unavailable`, `awaiting_face`, `confirming_face`,
+`present`, `tracking_loss`, `possible_absence`, `reminding`, `uncertain`,
+`stale`. Monitoring requires stable face presence before it arms. Continuous
+non-detection first uses the grace period, then possible_absence, then reminding
+at the configured absence threshold. Grace counts within the total duration.
+Any reliable present observation cancels pending absence; stable presence clears
+an active reminder.
+
+Dismissal clears the active reminder and resets the absence countdown. A later
+reminder requires a new continuous non-detection interval. Pause/session loss
+clears the face baseline,
+pending duration and active reminder.
+Unknown, stale and unavailable input clear evidence and reminders; a fresh stable
+face baseline is required before absence can remind again. A watchdog marks
+observations stale independently of the camera's longer transport timeout. Waiting
+without new observations never triggers an absence reminder.
+
+Manual previews still work while monitoring, but the next observation or actual
+policy transition may replace them. Clients must use `behaviour.reminder_active`
+for reminder prompts/dismissal, rather than infer reminders from display alone.
+Absence duration reflects the latest snapshot, not a client-side timer.
+See README and `.env.example` for defaults and tuning limitations.

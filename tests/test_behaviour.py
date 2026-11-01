@@ -42,7 +42,7 @@ def test_grace_and_exact_sustained_absence_threshold():
     feed(result, 'not_detected', 1, 1.75)
     assert result.status == 'tracking_loss'
     result.observe(observation(2, 'not_detected'), 2)
-    assert result.display == 'possible_absence'
+    assert result.status == 'possible_absence'
     feed(result, 'not_detected', 2.25, 10.75)
     assert not result.reminder_active
     result.observe(observation(11, 'not_detected'), 11)
@@ -62,7 +62,7 @@ def test_visible_face_cancels_pending_absence_and_stable_return_clears_reminder(
     assert result.reminder_active
     feed(result, 'present', 5.5, 5.75)
     assert not result.reminder_active
-    assert result.display == 'ready'
+    assert result.status == 'present'
 
 
 def test_unknown_cancels_reminder_and_requires_fresh_face_baseline():
@@ -70,7 +70,7 @@ def test_unknown_cancels_reminder_and_requires_fresh_face_baseline():
     feed(result, 'not_detected', 1, 2)
     assert result.reminder_active
     result.observe(observation(2.25, 'unknown', reason='low_light'), 2.25)
-    assert result.display == 'unavailable' and not result.reminder_active
+    assert result.status == 'uncertain' and not result.reminder_active
     feed(result, 'not_detected', 2.5, 20)
     assert result.status == 'awaiting_face'
     assert not result.reminder_active

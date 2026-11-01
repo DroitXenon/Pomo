@@ -1,4 +1,4 @@
-# Protocol v4
+# Protocol v6
 
 The browser connects to `/ws` on the page origin (WSS on HTTPS). JSON text commands
 remain limited to 4,096 bytes. Images use a separate bounded HTTP endpoint.
@@ -13,7 +13,7 @@ increment revision. All clients share one process-local robot; use one server wo
 
 ```json
 {
-  "type": "state", "protocol_version": 4,
+  "type": "state", "protocol_version": 6,
   "monitoring_enabled": false, "display": "ready",
   "camera_status": "paused", "revision": 0,
   "dev_controls": true, "camera_session": null,
@@ -111,7 +111,11 @@ diagnostic object in snapshots.
     "brightness": 115.2, "blur_variance": 210.4,
     "head_pose": {"yaw": 2.0, "pitch": -3.0, "roll": 0.0},
     "face_box": [0.2, 0.1, 0.8, 0.9],
-    "blendshapes": {"jawOpen": 0.1}
+    "blendshapes": {"eyeBlinkLeft": 0.1, "eyeBlinkRight": 0.1, "jawOpen": 0.1},
+    "eye_movement": {
+      "eyeLeft": {"direction": "center", "blink_score": 0.1667, "horizontal": 0.5, "vertical": 0.5, "vertical_offset": 0.0, "reason": "usable"},
+      "eyeRight": {"direction": "left", "blink_score": 0.1667, "horizontal": 0.8, "vertical": 0.5, "vertical_offset": 0.0, "reason": "usable"}
+    }
   },
   "head_direction": "forward",
   "behaviour": {
@@ -140,6 +144,56 @@ validation of these conventions remains pending. Missing pose gives `unknown`.
 mirrored preview. Blendshapes contain selected movement scores, never emotion,
 attention or identity labels. Head pose and blendshapes cannot trigger reminders.
 
+`eye_movement` contains `eyeLeft` and `eyeRight` observations. Each direction is
+`center`, `left`, `right`, `up`, `down`, `closed` or `unknown`. Eye names and directions use
+the subject's perspective on unmirrored input, independently of the mirrored preview.
+Horizontal position increases toward image-right (subject-left); vertical position
+increases downward. Both values are normalized to the eye opening in [0, 1].
+Horizontal classification uses the iris-to-corner ratio. Vertical classification
+uses `vertical_offset`: signed iris displacement from the eye-corner line divided
+by eye width, negative for up and positive for down. The default vertical threshold
+is 0.08. The lid-relative `vertical` ratio is diagnostic and is not the vertical
+direction reference. Near-zero corner-relative displacement remains center. Eye opening uses median upper/lower projections from three lid pairs. A neutral eye has `center` direction.
+
+Eye-local axes account for roll and image aspect ratio. Large head yaw/pitch is
+excluded beyond 60° yaw / 45° pitch because this heuristic does not fully
+compensate for perspective. Blink scores of at least 0.55 make the affected iris
+direction `closed`; raw blink values are still transmitted without rescaling.
+Qualifying blink scores are evaluated independently of head-angle availability.
+Valid narrow-lid geometry also reports closed without requiring iris landmarks. Reasons
+include `usable`, `blink`, `missing_landmarks`, `invalid_landmarks`, `eye_too_small`,
+`eye_closed`, `invalid_eye_geometry`, `iris_outside_eye`, `head_pose_unavailable`, `head_turned`
+and default `unavailable`. Unknown and closed directions have null positions. An absent or
+unknown face defaults to unknown eye observations, so no previous direction persists.
+This optional observation field is additive within protocol v6.
+
+`blendshapes` also includes `eyeLookUpLeft`, `eyeLookDownLeft`, `eyeLookUpRight`
+and `eyeLookDownRight`. A vertical coefficient must meet the configured threshold
+(default 0.30) and exceed the opposing coefficient by the configured margin
+(default 0.10). Qualified coefficients allow a half-sized displacement in the same direction;
+they cannot impose a vertical label on centered geometry or override measured
+motion in the opposite direction. This avoids treating asymmetric/moving lids as
+a fixed direction reference. The simulator exposes signed offsets and raw model
+signals separately for physical validation.
+
+Blink-threshold closure takes precedence. Eye-opening ratio below 0.06 also reports
+closed; ratios from 0.06 to below 0.12 report closed only without qualified vertical
+model evidence. Missing/invalid eye geometry and head-angle limits remain gates.
+The simulator exposes all four model coefficients in Vertical eye signals. They
+are diagnostic movement values, not probabilities or screen-gaze coordinates.
+
+Blink values remain in `blendshapes` as `eyeBlinkLeft`/`eyeBlinkRight`. Mouth values
+remain `jawOpen`, `mouthSmileLeft` and `mouthSmileRight`. The simulator renders two
+separate Eye movement/Mouth movement rows. Each eye observation includes an optional
+`blink_score` in [0, 1], calculated as `clamp(raw / full_closure_reference, 0, 1)`.
+The default raw full-closure reference is 0.60. This continuous score is independent
+of the closed/center/directional label; a closed label does not override it.
+Missing coefficients give null scores and display a dash, including when geometry
+alone establishes the closed label. Raw coefficients remain in `blendshapes`.
+Normalized scores are approximate closure signals rather than physical percentages
+or model confidence. Iris
+observations do not affect the absence policy or represent screen gaze/attention.
+
 ```json
 {"type":"dismiss_reminder"}
 ```
@@ -166,8 +220,15 @@ face baseline is required before absence can remind again. A watchdog marks
 observations stale independently of the camera's longer transport timeout. Waiting
 without new observations never triggers an absence reminder.
 
-Manual previews still work while monitoring, but the next observation or actual
-policy transition may replace them. Clients must use `behaviour.reminder_active`
-for reminder prompts/dismissal, rather than infer reminders from display alone.
+`display` belongs to manual expression previews. Observations, policy transitions,
+reminder dismissal, stale input and camera failures preserve the selected expression.
+Explicit monitoring enable/pause commands retain the ready reset. Camera ownership,
+observations and `behaviour.status` are separate from display. Detection data never
+selects Expression buttons or renders the robot face.
+
+Clients render detection/reminder information within the camera diagnostics, using
+`behaviour.reminder_active` for prompts and dismissal. Repeated snapshots do not
+repaint unchanged expression/title content or reset idle video sources. The app
+contains no full-page reload command.
 Absence duration reflects the latest snapshot, not a client-side timer.
 See README and `.env.example` for defaults and tuning limitations.

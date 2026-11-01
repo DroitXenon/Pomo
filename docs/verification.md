@@ -53,20 +53,50 @@ environment with Python 3.13.18, OpenCV contrib 5.0.0.93 and MediaPipe 1.2.0.
   inference, HTTP ingestion, WebSocket snapshots, pause and shutdown. A detailed
   synthetic noise scene produced no face/awaiting-face; a black scene produced
   unknown/low-light without a reminder. Images stayed in memory.
+- Real-model iris inference on the official public MediaPipe `portrait.jpg` asset
+  passed: a present face and usable center direction for both eyes. The source was
+  `https://storage.googleapis.com/mediapipe-assets/portrait.jpg`; the image was held
+  in memory only. Actual up/down coefficients were exported for both eyes, with
+  neutral portrait directions remaining center. This checks the model-to-observation
+  path, not physical gaze accuracy.
 - `python -m pip check`: no broken requirements.
 
 ### Automated checks
 
-- Backend suite: **46 passed**, with the existing Starlette/HTTPX deprecation
+- Backend suite: **112 passed**, with the existing Starlette/HTTPX deprecation
   warning. Tests cover frame validation, ownership, ordering, backpressure,
   expiration, worker lifecycle, observations, head angles/direction, continuous
   absence, stable return, dismissal and uncertain/stale/unavailable input.
 - Policy tests use synthetic observations and explicit monotonic times without a
   physical camera or timing sleeps. HTTP/WebSocket integration covers automatic
-  direction and stale inference.
-- Seven mocked Node tests passed: three capture-lifecycle tests and four simulator
+  head/iris direction, per-eye blink handling, eye/mouth score transport and stale
+  inference. Synthetic geometry covers both eyes, all directions, scale/roll, closed
+  eyes, missing/invalid landmarks, head-angle boundaries (including 60° yaw /
+  45° pitch), and single-lid outliers. Blink scores in 0.55–0.70 suppress iris
+  direction with a closed classification while remaining unscaled in observations. Eye opening uses median
+  projections from three eyelid pairs. Blink UI tests verify intermediate values through the closed-label boundary,
+  continuous reopening, per-eye independence and raw-score preservation. Normalized
+  values use a configurable full-closure reference rather than a binary label override. Closed lids
+  without iris points and invalid lid ordering are covered by geometry tests. Sustained eye observations
+  with a visible face do not trigger absence reminders.
+- Thirteen mocked Node tests passed: four capture-lifecycle tests and nine simulator
   rendering tests. JavaScript syntax checks passed for both modules. Node 22.14.0
   is an ignored local verification utility, not an application runtime dependency.
+- Corner-anchored vertical regressions cover asymmetric lids with centered iris,
+  upward iris/lid translation with centered lid-relative ratios, and model signals
+  that disagree with geometry. The official portrait retains center for both eyes.
+  This does not validate the reported live camera setup; center/up readings are
+  required to assess physical accuracy. Signed offsets are exposed in diagnostics.
+- Vertical-direction regressions cover both eyes with lids and iris moving together,
+  weak/ambiguous model signals, narrow open lids, blink precedence, raw coefficient
+  export and diagnostic rendering. Synthetic regressions establish algorithm paths;
+  live up/down detection is not verified by those tests.
+- All four manual expressions persist through detections, absence/reminding,
+  uncertainty, stale observations, dismissal and camera failure. Explicit monitoring
+  commands retain the ready reset. Rendering tests confirm stable selected buttons,
+  no repeated robot/title writes for identical expressions, and no idle-video resets.
+  Detection/reminder controls are in camera diagnostics. No full-page reload command
+  exists in the app; real-browser refresh behaviour remains unverified.
 - `sh -n scripts/setup.sh scripts/dev.sh` and `git diff --check` passed.
 - HTTP/WebSocket checks require execution outside this tool sandbox: sandboxed
   Starlette TestClient stalls in its event-loop portal before application startup.
@@ -75,9 +105,10 @@ environment with Python 3.13.18, OpenCV contrib 5.0.0.93 and MediaPipe 1.2.0.
 
 - Windows-browser webcam access, permission/tab lifecycle, resource release,
   responsive layout, accessibility, Windows/macOS installation and HTTPS forwarding.
-- Face detection accuracy, head-direction signs and
+- Face detection accuracy, head/iris-direction signs, per-eye thresholds and
   lighting/blur thresholds on a physical webcam. Plain backgrounds can be classified
   as low detail; the blur gate is configurable for evaluation.
 - Head direction and yaw/pitch/roll are automatic camera-relative diagnostics.
-  Facial movement scores do not establish
+  Eye movement and mouth movement have separate frontend diagnostics. Iris positions
+  are approximate and do not establish screen gaze. Facial movement scores do not establish
   attention, emotion or identity and do not trigger reminders.

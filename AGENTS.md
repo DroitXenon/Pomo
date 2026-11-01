@@ -20,7 +20,7 @@ Pomo is a desktop robot study companion. The software prototype uses a browser s
 - **Phase 3: Test and Validate.** Detection evaluation, deterministic behaviour tests, recovery, usability and installation checks.
 - Pomodoro/session controls and voice recognition are deferred. Implement them when requested as a separate task.
 
-The current baseline provides manual display previews, browser webcam capture, bounded JPEG ingestion, camera ownership and a long-lived processing worker. Timestamped face observations and a sustained-absence reminder policy are implemented. Head direction and blendshapes are diagnostics only. Physical-camera validation and firmware remain pending. Verify this baseline against the code before making status claims, and update the documentation as implementation progresses.
+The current baseline provides manual display previews, browser webcam capture, bounded JPEG ingestion, camera ownership and a long-lived processing worker. Timestamped face observations and a sustained-absence reminder policy are implemented. Head direction and blendshapes are diagnostics only. Detection data does not select manual expressions or drive the robot face. Physical-camera validation and firmware remain pending. Verify this baseline against the code before making status claims, and update the documentation as implementation progresses.
 
 The initial detection target is whether the user leaves the frame. Presence and head direction do not prove attention or distraction. Camera or connection failure must be represented as unavailable/unknown input rather than user absence.
 

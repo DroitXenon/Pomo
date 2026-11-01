@@ -8,7 +8,7 @@ const displayLabels = {
 };
 let socket, retryTimer, connectTimer, attempts = 0, stopped = false, state = null;
 const camera = new CameraController($("camera-preview"), $("camera-status"), (message) => {
-  $("feedback").textContent = message;
+  setText("feedback", message);
   send({type: "camera_failed"});
 });
 function log(text) {
@@ -24,16 +24,24 @@ function controls(connected) {
     button.disabled = !connected || !state?.dev_controls;
   });
 }
+function setText(id, value) {
+  const element = $(id);
+  const text = String(value);
+  if (element.textContent !== text) element.textContent = text;
+}
 function render(next) {
+  const expressionTransition = !state || state.display !== next.display;
   state = next;
-  $("screen").dataset.display = state.display;
-  $("state-title").textContent = displayLabels[state.display];
-  $("monitor").textContent = state.monitoring_enabled ? "Pause monitoring" : "Enable monitoring";
+  if (expressionTransition) {
+    $("screen").dataset.display = state.display;
+    setText("state-title", displayLabels[state.display]);
+    document.querySelectorAll("[data-preview]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.preview === state.display)));
+  }
+  setText("monitor", state.monitoring_enabled ? "Pause monitoring" : "Enable monitoring");
   $("monitor").setAttribute("aria-pressed", String(state.monitoring_enabled));
-  $("monitor-status").textContent = state.monitoring_enabled ? "Camera monitoring enabled" : "Monitoring paused";
-  $("revision").textContent = state.revision;
-  document.querySelectorAll("[data-preview]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.preview === state.display)));
-  $("feedback").textContent = state.dev_controls ? "" : "Expression controls disabled.";
+  setText("monitor-status", state.monitoring_enabled ? "Camera monitoring enabled" : "Monitoring paused");
+  setText("revision", state.revision);
+  setText("feedback", state.dev_controls ? "" : "Expression controls disabled.");
   controls(true);
   camera.update(state);
   renderDetection(state);
@@ -51,15 +59,28 @@ function renderDetection(next) {
   };
   const reasons = {usable: "Usable", no_face: "No face detected", low_light: "Low light",
     overexposed: "Overexposed", low_detail_or_blur: "Low detail or blur", invalid_landmarks: "Uncertain landmarks"};
-  $("detection-status").textContent = statuses[behaviour.status] || "Waiting for observations";
-  $("face-presence").textContent = {present: "Present", not_detected: "Not detected", unknown: "Unknown"}[observation?.presence] || "Unknown";
-  $("head-direction").textContent = next.head_direction || "unknown";
+  setText("detection-status", statuses[behaviour.status] || "Waiting for observations");
+  setText("face-presence", {present: "Present", not_detected: "Not detected", unknown: "Unknown"}[observation?.presence] || "Unknown");
+  setText("head-direction", next.head_direction || "unknown");
   const pose = observation?.head_pose;
-  $("head-angles").textContent = pose ? `Yaw ${pose.yaw.toFixed(0)}° / pitch ${pose.pitch.toFixed(0)}° / roll ${pose.roll.toFixed(0)}°` : "—";
-  $("image-quality").textContent = reasons[observation?.reason] || "—";
-  $("absence-duration").textContent = `${behaviour.absence_seconds || 0} s`;
-  $("expression-scores").textContent = Object.entries(observation?.blendshapes || {})
-    .map(([name, score]) => `${name}: ${score.toFixed(2)}`).join(" · ") || "—";
+  setText("head-angles", pose ? `Yaw ${pose.yaw.toFixed(0)}° / pitch ${pose.pitch.toFixed(0)}° / roll ${pose.roll.toFixed(0)}°` : "—");
+  setText("image-quality", reasons[observation?.reason] || "—");
+  setText("absence-duration", `${behaviour.absence_seconds || 0} s`);
+  const scores = observation?.blendshapes || {};
+  const formatScore = (name) => `${name}: ${Number.isFinite(scores[name]) ? scores[name].toFixed(2) : "—"}`;
+  const eyes = observation?.eye_movement;
+  const formatBlink = (name, eye) => `${name}: ${Number.isFinite(eye?.blink_score) ? eye.blink_score.toFixed(2) : "—"}`;
+  setText("eye-movement", [
+    `eyeLeft: ${eyes?.eyeLeft?.direction || "unknown"}`,
+    `eyeRight: ${eyes?.eyeRight?.direction || "unknown"}`,
+    formatBlink("eyeBlinkLeft", eyes?.eyeLeft), formatBlink("eyeBlinkRight", eyes?.eyeRight)
+  ].join(" · "));
+  setText("eye-vertical-signals", ["eyeLookUpLeft", "eyeLookDownLeft", "eyeLookUpRight", "eyeLookDownRight"]
+    .map(formatScore).join(" · "));
+  const formatOffset = (name, eye) => `${name}: ${Number.isFinite(eye?.vertical_offset) ? eye.vertical_offset.toFixed(3) : "—"}`;
+  setText("eye-vertical-offsets", [formatOffset("eyeLeft", eyes?.eyeLeft), formatOffset("eyeRight", eyes?.eyeRight)].join(" · "));
+  setText("mouth-movement", ["jawOpen", "mouthSmileLeft", "mouthSmileRight"]
+    .map(formatScore).join(" · "));
   $("reminder-message").hidden = !behaviour.reminder_active;
   $("dismiss-reminder").hidden = !behaviour.reminder_active;
   const overlay = $("face-overlay");
@@ -80,7 +101,7 @@ function renderDetection(next) {
 function connect() {
   if (stopped) return;
   controls(false);
-  $("connection").textContent = "Connecting";
+  setText("connection", "Connecting");
   $("connection").dataset.connected = "false";
   const url = new URL("ws", window.location.href);
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -89,17 +110,17 @@ function connect() {
   socket.onmessage = ({data}) => {
     try {
       const message = JSON.parse(data);
-      if (message.type === "state" && message.protocol_version === 4 && displayLabels[message.display]) {
+      if (message.type === "state" && message.protocol_version === 6 && displayLabels[message.display]) {
         clearTimeout(connectTimer);
         attempts = 0;
-        $("connection").textContent = "Connected";
+        setText("connection", "Connected");
         $("connection").dataset.connected = "true";
         const changed = !state || state.display !== message.display ||
           state.camera_status !== message.camera_status || state.behaviour?.status !== message.behaviour?.status;
         render(message);
         if (changed) log(`State ${message.revision}: ${message.display} · ${message.behaviour?.status || message.camera_status}`);
       } else if (message.type === "error") {
-        $("feedback").textContent = message.message;
+        setText("feedback", message.message);
         log(`Command rejected: ${message.code}`);
       }
     } catch { log("Unrecognised backend message"); }
@@ -109,12 +130,12 @@ function connect() {
     clearTimeout(connectTimer);
     controls(false);
     camera.stop();
-    $("detection-status").textContent = "Disconnected · observations may be stale";
+    setText("detection-status", "Disconnected · observations may be stale");
     $("face-overlay").getContext("2d").clearRect(0, 0, 640, 480);
-    $("camera-status").textContent = "Camera stopped · backend disconnected";
-    $("connection").textContent = "Disconnected";
+    setText("camera-status", "Camera stopped · backend disconnected");
+    setText("connection", "Disconnected");
     $("connection").dataset.connected = "false";
-    $("monitor-status").textContent = "Disconnected · displayed state may be stale";
+    setText("monitor-status", "Disconnected · displayed state may be stale");
     if (!stopped) {
       const delay = Math.min(1000 * 2 ** attempts++, 10000);
       log(`Disconnected; retrying in ${delay / 1000}s`);

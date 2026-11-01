@@ -7,9 +7,11 @@ import numpy as np
 
 from .config import PerceptionConfig
 from .observations import HeadPose
+from .eyes import eye_movement_from_landmarks
 
-EXPRESSION_NAMES = {'eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen',
-                    'mouthSmileLeft', 'mouthSmileRight'}
+MOVEMENT_NAMES = {'eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen',
+                  'mouthSmileLeft', 'mouthSmileRight', 'eyeLookUpLeft',
+                  'eyeLookUpRight', 'eyeLookDownLeft', 'eyeLookDownRight'}
 
 
 def pose_from_matrix(matrix):
@@ -88,7 +90,13 @@ class FacePerception:
         self.timestamp_ms = max(self.timestamp_ms + 1, int(time.monotonic() * 1000))
         result = self.model.detect_for_video(
             mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), self.timestamp_ms)
-        return self.observation_from_result(result, metrics)
+        observation = self.observation_from_result(result, metrics)
+        if observation['presence'] == 'present':
+            pose = HeadPose(**observation['head_pose']) if observation['head_pose'] else None
+            observation['eye_movement'] = eye_movement_from_landmarks(
+                result.face_landmarks[0], observation['blendshapes'], pose,
+                rgb.shape[1], rgb.shape[0], self.config).model_dump()
+        return observation
 
     @staticmethod
     def observation_from_result(result, metrics):
@@ -104,7 +112,7 @@ class FacePerception:
         shapes = result.face_blendshapes
         blendshapes = {category.category_name: round(float(category.score), 4)
                        for category in (shapes[0] if shapes else [])
-                       if category.category_name in EXPRESSION_NAMES and math.isfinite(category.score)}
+                       if category.category_name in MOVEMENT_NAMES and math.isfinite(category.score)}
         return dict(presence='present', reason='usable', face_box=box,
                     head_pose=pose.model_dump() if pose else None,
                     blendshapes=blendshapes, **metrics)

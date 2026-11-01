@@ -15,14 +15,13 @@ class Behaviour:
         self.present_since = None
         self.last_observed_at = None
         self.reminder_active = False
-        self.display = 'unavailable' if unavailable else 'ready'
         self.status = 'unavailable' if unavailable else 'awaiting_face' if enabled else 'paused'
 
     def uncertain(self, status='uncertain'):
         self.armed = False
         self.absence_since = self.present_since = None
         self.reminder_active = False
-        self.display, self.status = 'unavailable', status
+        self.status = status
 
     def observe(self, observation: Observation, now: float):
         if not self.enabled:
@@ -46,28 +45,27 @@ class Behaviour:
             if at - self.present_since >= self.config.return_seconds:
                 self.armed = True
                 self.reminder_active = False
-                self.display, self.status = 'ready', 'present'
+                self.status = 'present'
             elif not self.reminder_active:
-                self.display, self.status = 'ready', 'confirming_face'
+                self.status = 'confirming_face'
         else:
             self.present_since = None
             if not self.armed:
-                self.display, self.status = 'ready', 'awaiting_face'
+                self.status = 'awaiting_face'
                 return
             if self.reminder_active:
-                self.display, self.status = 'reminding', 'reminding'
+                self.status = 'reminding'
                 return
             if self.absence_since is None:
                 self.absence_since = at
             elapsed = at - self.absence_since
             if elapsed >= self.config.absence_seconds:
                 self.reminder_active = True
-                self.display, self.status = 'reminding', 'reminding'
+                self.status = 'reminding'
             elif elapsed >= self.config.tracking_loss_grace_seconds:
-                self.display = 'possible_absence'
                 self.status = 'possible_absence'
             else:
-                self.display, self.status = 'ready', 'tracking_loss'
+                self.status = 'tracking_loss'
 
     def tick(self, now: float):
         if (self.enabled and self.last_observed_at is not None and
@@ -79,7 +77,7 @@ class Behaviour:
             raise ValueError('There is no active detection reminder to dismiss')
         self.reminder_active = False
         self.absence_since = None
-        self.display, self.status = 'ready', 'tracking_loss'
+        self.status = 'tracking_loss'
 
     def snapshot(self):
         elapsed = (max(0, self.last_observed_at - self.absence_since)

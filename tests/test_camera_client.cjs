@@ -63,3 +63,12 @@ test('permission denial reports failure and retains useful status',async()=>{
   assert.equal(failures.length,1);
   assert.match(status.textContent,/permission denied/);
 });
+
+test('idle detection snapshots do not reset the video element',()=>{
+  const {camera,video}=setup(()=>Promise.reject(new Error('not expected')));
+  let resets=0;
+  Object.defineProperty(video,'srcObject',{get:()=>null,set(){resets++;}});
+  camera.update({camera_session:null,camera_status:'paused'});
+  camera.update({camera_session:null,camera_status:'paused'});
+  assert.equal(resets,0);
+});

@@ -13,7 +13,7 @@ class CameraController {
     this.upload?.abort();
     this.stream?.getTracks().forEach((track) => { track.onended = null; track.stop(); });
     this.stream = null;
-    this.video.srcObject = null;
+    if (this.video.srcObject !== null) this.video.srcObject = null;
     this.session = null;
   }
   update(state) {

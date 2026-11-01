@@ -89,9 +89,16 @@ observations drive a separate backend policy; raw frames remain outside shared s
 Browser camera frames (synthetic observations in automated tests)
   → presence detection and timestamped observations
   → backend behaviour policy: duration and dismissal
-  → display state
-  → browser simulator / future physical robot adapter
+  → detection status and reminder diagnostics
+  → browser detection details / future physical robot adapter
 ```
+
+Expression previews are manual controls, independent of detection data. Camera
+observations, absence, uncertain/stale input and camera failures do not select an
+expression or alter the robot face. Detection status and reminder controls belong
+to the camera diagnostics. Explicit monitoring commands retain their ready reset.
+Repeated snapshots render only text or expression content that differs from the
+current display; they do not reload the page.
 
 The observation pipeline and sustained-absence policy are implemented; physical-camera evaluation remains pending. The `firmware/` directory currently contains integration notes; it does not contain a working hardware adapter.
 
@@ -113,6 +120,44 @@ The camera panel shows face presence, quality reasons, absence duration
 and selected facial movement scores. Head direction and yaw/pitch/roll angles are estimated automatically relative to
 the camera. Head direction and blendshape scores do not trigger reminders or establish
 attention, emotion or identity. The face box is a development overlay.
+
+The detection details separate **Eye movement** and **Mouth movement**:
+
+```text
+Eye movement: eyeLeft: closed · eyeRight: right · eyeBlinkLeft: 1.00 · eyeBlinkRight: 0.48
+Mouth movement: jawOpen: 0.00 · mouthSmileLeft: 0.00 · mouthSmileRight: 0.00
+```
+
+Each iris is located relative to its eye corners and lids using the existing
+478-landmark mesh. Eye-local pixel axes account for head roll and image aspect
+ratio. Median measurements across three eyelid pairs reduce single-landmark jitter. Directions are `center`, `left`, `right`, `up`, `down`, `closed` or `unknown`, from
+the subject's perspective. The mirrored preview does not swap eye names or labels.
+Detected closure reports `closed` for the affected eye. Tiny eyes, missing
+landmarks and strong head yaw/pitch yield unknown direction. A qualifying blink
+score can still report closed when head orientation prevents iris tracking. Missing movement scores display a dash rather than zero.
+Vertical direction uses signed iris displacement from the eye-corner line,
+normalized by eye width. Negative offset means up; positive means down. The default
+threshold is 0.08 eye widths. A near-zero offset remains center even if the iris
+appears off-center between asymmetric eyelids.
+
+MediaPipe's per-eye up/down coefficients provide corroboration: at least 0.30,
+and 0.10 above the opposite signal, allows a half-sized measured excursion in the
+same direction. A model coefficient alone cannot turn centered geometry into up.
+**Iris vertical offsets** and **Vertical eye signals** in Detection details expose
+both measurements for webcam evaluation. These are not gaze probabilities.
+
+These are coarse iris-position estimates, not screen-gaze coordinates, and do not
+trigger reminders or distraction decisions. The supported head-angle range is
+60° yaw / 45° pitch, subject to usable eye geometry. Raw MediaPipe coefficients remain in the observation. The frontend displays
+`eyeBlinkLeft`/`eyeBlinkRight` as continuous normalized scores:
+`min(raw blink coefficient / 0.60, 1.00)`. Partial closure retains intermediate
+values, including while the direction label is `closed`. The label does not force
+the number to 1.00. The full-closure reference is configurable. These scores are
+not calibrated physical percentages or model confidence. A raw blink score of at least 0.55 classifies the eye closed. Valid eye-opening
+ratios below 0.06 also classify closed; ratios below 0.12 do so when no qualified
+vertical eye signal supports an open-eye movement. These are prototype defaults,
+not calibrated probabilities or verified accuracy guarantees. Physical accuracy
+requires evaluation.
 
 Quality thresholds are heuristics and have not been tuned on a physical webcam.
 A plain background can look like a low-detail/blurred image and suppress absence
@@ -233,11 +278,22 @@ is processed at a time; old frames are not queued or replayed.
 | `POMO_PERCEPTION_YAW_DEGREES` / `POMO_PERCEPTION_PITCH_DEGREES` | 30 / 25 | Direction thresholds relative to the camera |
 | `POMO_PERCEPTION_HYSTERESIS_DEGREES` | 5 | Direction exit margin to reduce flicker |
 
+| Iris setting | Default | Purpose |
+| --- | --- | --- |
+| `POMO_PERCEPTION_EYE_HORIZONTAL_MARGIN` | 0.15 | Horizontal distance from eye midpoint before left/right |
+| `POMO_PERCEPTION_EYE_VERTICAL_OFFSET_THRESHOLD` | 0.08 | Signed iris displacement from eye-corner line, normalized by eye width |
+| `POMO_PERCEPTION_EYE_VERTICAL_SIGNAL_THRESHOLD` | 0.30 | Minimum model up/down coefficient to supplement iris geometry |
+| `POMO_PERCEPTION_EYE_VERTICAL_SIGNAL_MARGIN` | 0.10 | Minimum difference between opposing model up/down coefficients |
+| `POMO_PERCEPTION_EYE_BLINK_THRESHOLD` | 0.55 | Raw blink threshold for closed-eye classification |
+| `POMO_PERCEPTION_EYE_BLINK_FULL_CLOSURE` | 0.60 | Raw blink coefficient mapped continuously to displayed 1.00 |
+| `POMO_PERCEPTION_EYE_MAX_YAW_DEGREES` | 60 | Maximum absolute head yaw for iris interpretation |
+| `POMO_PERCEPTION_EYE_MAX_PITCH_DEGREES` | 45 | Maximum absolute head pitch for iris interpretation |
+
 Choose freshness limits above the expected upload interval plus processing latency.
 Processing results older than the observation limit are unknown even when the
 camera transport remains available. All timing uses the backend's monotonic clock.
 
-### Protocol v4
+### Protocol v6
 
 `/health` reports phase 2 and `camera_processor_ready`. `/ws` broadcasts complete
 state snapshots with camera status (`paused`, `starting`, `available`,
@@ -251,8 +307,8 @@ add observation, head-direction and behaviour diagnostics. Display values remain
 `reminding`, `unavailable`; manual previews do not represent detection results.
 Connection health, camera availability and robot display remain independent.
 
-Protocol v4 defines the camera, observation and behaviour contracts. Update
-frontend and backend together. See [protocol v4](docs/protocol.md) for exact contracts,
+Protocol v6 defines the camera, observation and behaviour contracts. Update
+frontend and backend together. See [protocol v6](docs/protocol.md) for exact contracts,
 validation, ownership, timeouts and reconnection behaviour.
 
 ## Verification
@@ -287,8 +343,9 @@ Manual Windows-browser check:
 5. Test permission denial, tab hiding, owner tab close and backend restart.
 6. Re-enable explicitly after interruptions; verify a new session and fresh frames.
 7. Preview robot expressions; verify they remain independent of camera status.
-8. Stay visible until Face visible; check automatic direction and angles by turning
-   left/right/up/down.
+8. Stay visible until Face visible; check automatic head direction and angles by
+   turning left/right/up/down. With your head approximately forward, check each eye
+   direction and blink score, then verify mouth scores remain in their own row.
 9. Leave the frame for over 10 seconds in a usable scene; verify a reminder, dismissal
    and a fresh absence countdown. Return for at least 0.5 seconds and check recovery.
 10. Test darkness/occlusion and interrupted uploads; confirm uncertain/stale input
@@ -320,6 +377,7 @@ backend/
   config.py           Validated camera, perception and behaviour settings
   observations.py     Timestamped observation schema
   perception.py       Face Landmarker and head-direction diagnostics
+  eyes.py             Eye-local iris direction observations
   behaviour.py        Camera-independent sustained-absence policy
 simulator/
   index.html          Robot display and simulator controls
@@ -351,7 +409,7 @@ environment.yml       Conda runtime and pinned Python packages
 - [x] Implement presence/absence observations for the initial prototype.
 - [x] Add timestamps and observation freshness checks; handle poor lighting, uncertain results and temporary tracking loss.
 - [x] Define backend state transitions and configurable sustained-absence thresholds.
-- [x] Connect observations to backend decisions and broadcast the resulting display state.
+- [x] Connect observations to backend decisions and broadcast detection diagnostics independently of manual expressions.
 - [x] Implement reminder dismissal, pause/resume and recovery when the user returns.
 - [ ] Add an optional sound cue with mute control.
 - [x] Add diagnostics for observation duration, detection state and errors.

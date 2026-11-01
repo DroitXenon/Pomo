@@ -1,4 +1,6 @@
 """Synthetic detections through the real HTTP/WebSocket and policy integration."""
+import pytest
+
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
@@ -42,18 +44,18 @@ def test_observations_absence_reminder_dismissal_and_pause():
             now[0] += 0.25
             assert frame('not_detected')['behaviour']['status'] == 'tracking_loss'
             now[0] += 0.25
-            assert frame('not_detected')['display'] == 'possible_absence'
+            assert frame('not_detected')['behaviour']['status'] == 'possible_absence'
             for _ in range(3):
                 now[0] += 0.25
                 state = frame('not_detected')
-            assert state['display'] == 'reminding'
+            assert state['behaviour']['status'] == 'reminding'
             ws.send_json({'type': 'dismiss_reminder'})
             assert not ws.receive_json()['behaviour']['reminder_active']
             now[0] += 0.25
             assert not frame('not_detected')['behaviour']['reminder_active']
             now[0] += 0.25
             state = frame('unknown')
-            assert state['camera_status'] == 'available' and state['display'] == 'unavailable'
+            assert state['camera_status'] == 'available' and state['behaviour']['status'] == 'uncertain'
             assert not state['behaviour']['armed']
             ws.send_json({'type': 'set_monitoring', 'enabled': False})
             state = ws.receive_json()
@@ -72,7 +74,7 @@ def test_watchdog_stales_observation_before_transport_timeout():
             state = ws.receive_json()
             assert state['behaviour']['status'] == 'stale'
             assert state['camera_status'] == 'available' and state['monitoring_enabled']
-            assert state['observation'] is None and state['display'] == 'unavailable'
+            assert state['observation'] is None and state['behaviour']['status'] == 'stale'
 
 
 def test_manual_preview_dismissal_does_not_mutate_state():
@@ -117,3 +119,75 @@ def test_first_turned_face_gets_automatic_direction():
             state = ws.receive_json()
             assert state['head_direction'] == 'left'
             assert state['observation']['head_pose']['yaw'] == 45
+
+
+def test_eye_observations_reach_clients_without_driving_reminders():
+    app, now, detection = harness()
+    detection['eye_movement'] = {'eyeLeft': {'direction':'left','horizontal':0.8,'vertical':0.5,'reason':'usable'},
+                                'eyeRight': {'direction':'down','horizontal':0.5,'vertical':0.8,'reason':'usable'}}
+    detection['blendshapes'] = {'eyeBlinkLeft':0.55,'eyeBlinkRight':0.48,'jawOpen':0}
+    with TestClient(app) as client:
+        with client.websocket_connect('/ws') as ws:
+            token = start(ws)
+            assert upload(client, token).status_code == 200
+            state = ws.receive_json()
+            assert state['observation']['eye_movement']['eyeLeft']['direction'] == 'left'
+            assert state['observation']['eye_movement']['eyeRight']['direction'] == 'down'
+            assert state['observation']['blendshapes']['eyeBlinkRight'] == 0.48
+            assert not state['behaviour']['reminder_active']
+            for sequence in range(1, 49):
+                now[0] += 0.25
+                assert upload(client, token, sequence).status_code == 200
+                state = ws.receive_json()
+                assert not state['behaviour']['reminder_active']
+                assert state['display'] == 'ready'
+            assert state['behaviour']['armed']
+
+
+def test_closed_eye_label_and_raw_blink_score_reach_clients():
+    app, _, detection=harness()
+    detection['eye_movement']={'eyeLeft':{'direction':'closed','reason':'blink'},
+                               'eyeRight':{'direction':'center','horizontal':0.5,'vertical':0.5,'reason':'usable'}}
+    detection['blendshapes']={'eyeBlinkLeft':0.6,'eyeBlinkRight':0.12}
+    with TestClient(app) as client:
+        with client.websocket_connect('/ws') as ws:
+            token=start(ws)
+            assert upload(client,token).status_code==200
+            state=ws.receive_json()
+            assert state['observation']['eye_movement']['eyeLeft']['direction']=='closed'
+            assert state['observation']['blendshapes']['eyeBlinkLeft']==0.6
+            assert not state['behaviour']['reminder_active']
+
+
+@pytest.mark.parametrize('expression',['ready','possible_absence','reminding','unavailable'])
+def test_manual_expression_survives_detections_dismissal_stale_input_and_camera_failure(expression):
+    app,now,detection=harness()
+    with TestClient(app) as client:
+        with client.websocket_connect('/ws') as ws:
+            token=start(ws)
+            ws.send_json({'type':'preview_display','display':expression})
+            assert ws.receive_json()['display']==expression
+            sequence=0
+            def frame(presence):
+                nonlocal sequence
+                detection['presence']=presence
+                now[0]+=0.25
+                assert upload(client,token,sequence).status_code==200
+                sequence+=1
+                snapshot=ws.receive_json()
+                assert snapshot['display']==expression
+                return snapshot
+            frame('present')
+            frame('present')
+            for _ in range(5):
+                snapshot=frame('not_detected')
+            assert snapshot['behaviour']['reminder_active']
+            ws.send_json({'type':'dismiss_reminder'})
+            assert ws.receive_json()['display']==expression
+            frame('unknown')
+            now[0]+=1.1
+            stale=ws.receive_json()
+            assert stale['behaviour']['status']=='stale' and stale['display']==expression
+            ws.send_json({'type':'camera_failed'})
+            failed=ws.receive_json()
+            assert failed['camera_status']=='unavailable' and failed['display']==expression

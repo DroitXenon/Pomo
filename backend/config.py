@@ -41,6 +41,15 @@ class PerceptionConfig(BaseModel):
     pitch_degrees: float = Field(default=25, ge=10, le=80)
     hysteresis_degrees: float = Field(default=5, ge=0, lt=10)
 
+    eye_horizontal_margin: float = Field(default=0.15, ge=0.05, le=0.45)
+    eye_vertical_offset_threshold: float = Field(default=0.08, ge=0.02, le=0.30)
+    eye_vertical_signal_threshold: float = Field(default=0.30, ge=0.05, le=1)
+    eye_vertical_signal_margin: float = Field(default=0.10, ge=0, le=1)
+    eye_blink_threshold: float = Field(default=0.55, ge=0, le=1)
+    eye_blink_full_closure: float = Field(default=0.60, ge=0.05, le=1)
+    eye_max_yaw_degrees: float = Field(default=60, ge=0, le=80)
+    eye_max_pitch_degrees: float = Field(default=45, ge=0, le=80)
+
     @model_validator(mode='after')
     def ordered_brightness(self):
         if self.min_brightness >= self.max_brightness:

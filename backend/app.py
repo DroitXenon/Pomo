@@ -53,7 +53,7 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
     active_job = None
 
     def snapshot(peer=None):
-        return {'type': 'state', 'protocol_version': 4, **state,
+        return {'type': 'state', 'protocol_version': 6, **state,
                 'dev_controls': dev_controls, 'camera_settings': config.browser_settings(),
                 'behaviour': policy.snapshot(),
                 'camera_session': session if peer is owner else None}
@@ -73,8 +73,10 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
         policy.reset(unavailable=status == 'unavailable')
         head.reset()
         state.update(monitoring_enabled=False, camera_status=status,
-                     frames_received=0, last_frame=None, display=policy.display,
+                     frames_received=0, last_frame=None,
                      observation=None, head_direction='unknown')
+        if status == 'paused':
+            state['display'] = 'ready'
 
     async def watchdog():
         while True:
@@ -89,7 +91,7 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                 previous_status = policy.status
                 policy.tick(clock())
                 if policy.status != previous_status:
-                    state.update(display=policy.display, observation=None, head_direction='unknown')
+                    state.update(observation=None, head_direction='unknown')
                     head.classify(None)
                     state['revision'] += 1
                     await broadcast()
@@ -104,7 +106,7 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
         except Exception:
             LOG.exception('Camera processor initialization failed; check dependencies and model')
             policy.reset(unavailable=True)
-            state.update(camera_status='unavailable', display=policy.display)
+            state.update(camera_status='unavailable')
         timer = asyncio.create_task(watchdog())
         try:
             yield
@@ -172,7 +174,7 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                                               presence='unknown', reason='stale')
                 policy.observe(observation, last_input)
                 direction = head.classify(observation.head_pose if observation.presence == 'present' else None)
-                state.update(observation=observation.model_dump(), display=policy.display,
+                state.update(observation=observation.model_dump(),
                              head_direction=direction)
                 state.update(camera_status='available', frames_received=state['frames_received'] + 1,
                              last_frame={'width': result['width'], 'height': result['height'], 'sequence': sequence})
@@ -254,7 +256,6 @@ def create_app(dev_controls: bool = True, *, camera_config: CameraConfig | None 
                             reset('unavailable')
                         elif command.type == 'dismiss_reminder':
                             policy.dismiss()
-                            state['display'] = policy.display
                         else:
                             state['display'] = command.display
                         state['revision'] += 1

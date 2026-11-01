@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pomo · Simulator</title>
-  <link rel="stylesheet" href="style.css?v=5"><script src="camera.js?v=1" defer></script><script src="app.js?v=8" defer></script>
+  <link rel="stylesheet" href="style.css?v=8"><script src="camera.js?v=2" defer></script><script src="app.js?v=14" defer></script>
 </head>
 <body>
   <header>
@@ -17,8 +17,6 @@
         <h2 id="state-title" aria-live="polite">Connecting…</h2>
         <button id="monitor" class="primary" disabled>Enable monitoring</button>
         <p id="monitor-status" class="small">Monitoring status unknown</p>
-        <p id="reminder-message" class="small" role="status" hidden>Your face has not been visible for a while. Ready to return?</p>
-        <button id="dismiss-reminder" hidden disabled>Dismiss reminder</button>
       </section>
       <aside class="controls-panel" aria-label="Simulator controls">
         <section class="camera-panel" aria-label="Camera preview">
@@ -31,12 +29,17 @@
           <p id="detection-status" class="small" role="status">Detection paused</p>
           <details class="diagnostics">
             <summary>Detection details</summary>
+            <p id="reminder-message" class="small" role="status" hidden>Your face has not been visible for a while. Ready to return?</p>
+            <button id="dismiss-reminder" hidden disabled>Dismiss reminder</button>
             <div class="detail-row"><span>Face</span><strong id="face-presence">Unknown</strong></div>
             <div class="detail-row"><span>Head direction</span><strong id="head-direction">Unknown</strong></div>
             <div class="detail-row"><span>Head angles</span><strong id="head-angles">—</strong></div>
             <div class="detail-row"><span>Image quality</span><strong id="image-quality">—</strong></div>
             <div class="detail-row"><span>Absence</span><strong id="absence-duration">0 s</strong></div>
-            <div class="detail-row"><span>Facial movement scores</span><strong id="expression-scores">—</strong></div>
+            <div class="detail-row"><span>Eye movement</span><strong id="eye-movement">—</strong></div>
+            <div class="detail-row"><span>Iris vertical offsets</span><strong id="eye-vertical-offsets">—</strong></div>
+            <div class="detail-row"><span>Vertical eye signals</span><strong id="eye-vertical-signals">—</strong></div>
+            <div class="detail-row"><span>Mouth movement</span><strong id="mouth-movement">—</strong></div>
           </details>
         </section>
         <h2>Expression</h2>

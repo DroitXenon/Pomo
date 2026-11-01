@@ -40,3 +40,28 @@ Face Landmarker uses the Tasks API with VIDEO mode and strictly increasing
 worker timestamps, with blendshapes and transformation matrices enabled. Model
 confidence options are thresholds rather than fabricated output confidence scores.
 Reference: https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/python
+
+
+Coarse per-eye direction uses the iris rings and eye contours from the same face
+mesh. Eye-local axes normalize position and account for head roll. Blink/geometry
+checks and a head-angle limit keep unavailable measurements unknown. Detected closure reports closed per eye.
+The UI shows continuous normalized blink scores, independently of eye direction
+labels. The API retains raw MediaPipe blendshape coefficients. No additional
+model or dependency is required. The UI groups eye directions/blinks and mouth
+movement separately. Iris positions are diagnostic observations rather than gaze
+coordinates or distraction scores.
+Landmark reference: https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/python/solutions/face_mesh_connections.py
+
+
+Vertical eye direction uses iris displacement relative to the eye-corner line,
+normalized by eye width. Lid-relative position remains a diagnostic. Qualified
+Face Landmarker eyeLookUp/eyeLookDown coefficients corroborate smaller excursions;
+coefficients cannot independently override centered or opposite geometry. Detection
+details exposes corner-relative offsets and raw coefficients for webcam evaluation.
+
+
+Manual expression state and detection diagnostics have separate responsibilities.
+Only preview commands and explicit monitoring resets select the robot expression;
+observation processing cannot select expression buttons or repaint the robot face.
+Rendering avoids repeated DOM writes for unchanged content. Camera diagnostics
+contain detection status and reminder controls.
